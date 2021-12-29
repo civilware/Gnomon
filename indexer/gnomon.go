@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
+	"github.com/civilware/Gnomon/graviton"
 	"github.com/civilware/Gnomon/rwc"
+
 	"github.com/docopt/docopt-go"
 
 	"github.com/deroproject/derohe/block"
@@ -40,21 +44,26 @@ Usage:
 
 Options:
   -h --help     Show this screen.
-  --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon
-  --blid=<1c1ce37ed1726f8626566f7e1dbb6e8855bd620a2aea4683f001708126792dce>		block id to query (example blid may not be present in the public chain)`
+  --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon`
 
 var rpc_client = &Client{}
 
 var daemon_endpoint string
 var blid string
 var Connected bool = false
+var chain_topoheight int64
+var last_indexedheight int64
 
 func main() {
 	var err error
 
+	// Initial set to 1 as topoheight 0 doesn't exist
+	last_indexedheight = 1
+
+	// Inspect argument(s)
 	var arguments map[string]interface{}
 	arguments, err = docopt.Parse(command_line, nil, true, "DERO Message Client : work in progress", false)
-	//_ = arguments
+
 	if err != nil {
 		log.Fatalf("[Main] Error while parsing arguments err: %s\n", err)
 	}
@@ -67,57 +76,85 @@ func main() {
 
 	log.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_endpoint)
 
-	if arguments["--blid"] != nil {
-		blid = arguments["--blid"].(string)
-	} else {
-		log.Fatalf("[Main] No blid defined.")
-		return
+	// Database - TODO: Not used or handled yet.. more for testing for the time being
+	shasum := fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
+	db_folder := fmt.Sprintf("%s_%s", "Gnomon", shasum)
+	dbtrees := []string{"test1", "test2", "test3"}
+	graviton.NewGravDB(dbtrees, db_folder, "25ms", 5000)
+
+	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
+	for {
+		err = Connect()
+		if err != nil {
+			continue
+		}
+		break
 	}
 
+	// Continuously getInfo from daemon to update topoheight globally
+	go rpc_client.getInfo()
+	time.Sleep(1 * time.Second)
+
+	for {
+		if last_indexedheight == chain_topoheight {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		log.Printf("Checking topoheight %v / %v", last_indexedheight, chain_topoheight)
+
+		blid, err = rpc_client.getBlockHash(uint64(last_indexedheight))
+		if err != nil {
+			log.Printf("[mainFOR] ERROR - %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		//log.Printf("BLID from getBlockHash(): %v", blid)
+
+		err = rpc_client.indexBlock(blid)
+		if err != nil {
+			log.Printf("[mainFOR] ERROR - %v", err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		last_indexedheight++
+	}
+}
+
+func Connect() (err error) {
 	rpc_client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+daemon_endpoint+"/ws", nil)
 
 	// notify user of any state change
 	// if daemon connection breaks or comes live again
 	if err == nil {
 		if !Connected {
-			log.Printf("Connection to RPC server successful - ws://%s/ws", daemon_endpoint)
+			log.Printf("[Connect] Connection to RPC server successful - ws://%s/ws", daemon_endpoint)
 			Connected = true
 		}
 	} else {
-		log.Fatalf("Error connecting to daemon %v", err)
+		log.Printf("[Connect] ERROR connecting to daemon %v", err)
 
 		if Connected {
-			log.Fatalf("Connection to RPC server Failed - ws://%s/ws", daemon_endpoint)
+			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws", daemon_endpoint)
 		}
 		Connected = false
-		return
+		return err
 	}
 
 	input_output := rwc.New(rpc_client.WS)
 	rpc_client.RPC = jrpc2.NewClient(channel.RawJSON(input_output, input_output), nil)
 
-	var result string
-	if err := rpc_client.RPC.CallResult(context.Background(), "DERO.Ping", nil, &result); err != nil {
-		log.Fatalf("Ping failed: %v", err)
-	} else {
-		//		fmt.Printf("Ping Received %s\n", result)
-	}
+	return err
+}
 
-	var info rpc.GetInfo_Result
-
-	// collect all the data afresh,  execute rpc to service
-	if err = rpc_client.RPC.CallResult(context.Background(), "DERO.GetInfo", nil, &info); err != nil {
-		log.Fatalf("GetInfo failed: %v", err)
-	} else {
-		//mainnet = !info.Testnet // inverse of testnet is mainnet
-		log.Printf("%v", info)
-	}
-
+func (client *Client) indexBlock(blid string) (err error) {
 	var io rpc.GetBlock_Result
 	var ip = rpc.GetBlock_Params{Hash: blid}
 
 	if err = rpc_client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
-		log.Fatalf("GetBlock failed: %v", err)
+		log.Printf("[indexBlock] ERROR - GetBlock failed: %v", err)
+		return err
 	} else {
 		//mainnet = !info.Testnet // inverse of testnet is mainnet
 		//log.Printf("%v", io)
@@ -142,7 +179,8 @@ func main() {
 		inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
 
 		if err = rpc_client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-			log.Fatalf("GetTransaction failed: %v", err)
+			log.Printf("[indexBlock] ERROR - GetTransaction failed: %v", err)
+			return err
 		} else {
 			//mainnet = !info.Testnet // inverse of testnet is mainnet
 			//log.Printf("%v", output)
@@ -197,5 +235,50 @@ func main() {
 		}
 	} else {
 		log.Printf("Block %v does not have any SC txs", bl.GetHash())
+	}
+
+	return err
+}
+
+func (client *Client) getBlockHash(height uint64) (hash string, err error) {
+	//log.Printf("[getBlockHash] Attempting to get block details at topoheight %v", height)
+
+	var io rpc.GetBlockHeaderByHeight_Result
+	var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: height}
+
+	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
+		log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v", err)
+		return hash, err
+	} else {
+		//log.Printf("[getBlockHash] Retrieved block header from topoheight %v", height)
+		//mainnet = !info.Testnet // inverse of testnet is mainnet
+		//log.Printf("%v", io)
+	}
+
+	hash = io.Block_Header.Hash
+
+	return hash, err
+}
+
+func (client *Client) getInfo() {
+	for {
+		var err error
+
+		var info rpc.GetInfo_Result
+
+		// collect all the data afresh,  execute rpc to service
+		if err = rpc_client.RPC.CallResult(context.Background(), "DERO.GetInfo", nil, &info); err != nil {
+			log.Printf("[getInfo] ERROR - GetInfo failed: %v", err)
+			time.Sleep(1 * time.Second)
+			Connect() // Attempt to re-connect now
+			continue
+		} else {
+			//mainnet = !info.Testnet // inverse of testnet is mainnet
+			//log.Printf("%v", info)
+		}
+
+		chain_topoheight = info.TopoHeight
+
+		time.Sleep(5 * time.Second)
 	}
 }
