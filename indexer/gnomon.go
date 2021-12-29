@@ -33,6 +33,7 @@ type Client struct {
 }
 
 type Parse struct {
+	txid       string
 	scid       string
 	entrypoint string
 	method     string
@@ -59,6 +60,8 @@ var Connected bool = false
 var Closing bool = false
 var chain_topoheight int64
 var last_indexedheight int64
+
+var validated_scs []string
 
 func main() {
 	var err error
@@ -116,7 +119,7 @@ func main() {
 			select {}
 		}
 
-		if last_indexedheight == chain_topoheight {
+		if last_indexedheight > chain_topoheight {
 			time.Sleep(1 * time.Second)
 			continue
 		}
@@ -212,6 +215,7 @@ func (client *Client) indexBlock(blid string) (err error) {
 		if tx.TransactionType == transaction.SC_TX {
 			sc_args = tx.SCDATA
 			var method string
+			var scid string
 
 			entrypoint := fmt.Sprintf("%v", sc_args.Value("entrypoint", "S"))
 
@@ -220,12 +224,16 @@ func (client *Client) indexBlock(blid string) (err error) {
 			// Other ways to parse this, but will do for now --> see github.com/deroproject/derohe/blockchain/blockchain.go l.688
 			if sc_action == "1" {
 				method = "installsc"
+				scid = string(bl.Tx_hashes[i].String())
 			} else {
 				method = "scinvoke"
+				// Get "SC_ID" which is of type H to byte.. then to string
+				scid_hex := []byte(fmt.Sprintf("%v", sc_args.Value("SC_ID", "H")))
+				scid = string(scid_hex)
 			}
 
 			log.Printf("TX %v is a SC transaction!", bl.Tx_hashes[i])
-			bl_sctxs = append(bl_sctxs, Parse{scid: bl.Tx_hashes[i].String(), entrypoint: entrypoint, method: method, sc_args: sc_args})
+			bl_sctxs = append(bl_sctxs, Parse{txid: bl.Tx_hashes[i].String(), scid: scid, entrypoint: entrypoint, method: method, sc_args: sc_args})
 		} else {
 			log.Printf("TX %v is NOT a SC transaction.", bl.Tx_hashes[i])
 		}
@@ -236,7 +244,7 @@ func (client *Client) indexBlock(blid string) (err error) {
 
 		for i := 0; i < len(bl_sctxs); i++ {
 			if bl_sctxs[i].method == "installsc" {
-				//log.Printf("%v", bl_sctxs[i].scid)
+				//log.Printf("%v", bl_sctxs[i].txid)
 
 				code := fmt.Sprintf("%v", bl_sctxs[i].sc_args.Value("SC_CODE", "S"))
 
@@ -244,13 +252,25 @@ func (client *Client) indexBlock(blid string) (err error) {
 				contains := strings.Contains(code, "200 STORE(\"artificerfee\", 1)")
 				if !contains {
 					// Then reject the validation that this is an artificer installsc action and move on
-					log.Printf("Tx %v does not contain the match string for artificer, moving on.", bl_sctxs[i].scid)
+					log.Printf("SCID %v does not contain the match string for artificer, moving on.", bl_sctxs[i].scid)
 				} else {
 					// Append into db for artificer validated SC
-					log.Printf("Tx %v matches artificer. This should be added to DB.", bl_sctxs[i].scid)
+					log.Printf("SCID %v matches artificer. This should be added to DB.", bl_sctxs[i].scid)
+					validated_scs = append(validated_scs, bl_sctxs[i].scid)
 				}
 			} else {
-				log.Printf("%v", bl_sctxs[i].scid)
+				if scidExist(validated_scs, bl_sctxs[i].scid) {
+					log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.", bl_sctxs[i].scid)
+					if bl_sctxs[i].entrypoint == "Start" {
+						log.Printf("Tx %v matches scinvoke call of Start. This should be added to DB.", bl_sctxs[i].txid)
+					} else {
+						log.Printf("Tx %v does not match scinvoke call of Start, but %v instead. This should not (currently) be added to DB.", bl_sctxs[i].txid, bl_sctxs[i].entrypoint)
+					}
+				} else {
+					log.Printf("SCID %v is not validated and thus we do not log SC interactions for this. Moving on.", bl_sctxs[i].scid)
+				}
+				//log.Printf("%v", bl_sctxs[i].scid)
+				//log.Printf("%v", bl_sctxs[i].entrypoint)
 			}
 		}
 	} else {
@@ -258,6 +278,16 @@ func (client *Client) indexBlock(blid string) (err error) {
 	}
 
 	return err
+}
+
+func scidExist(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (client *Client) getBlockHash(height uint64) (hash string, err error) {
@@ -316,7 +346,7 @@ func SetupCloseHandler() {
 		log.Printf("Closing - syncing stats...")
 		Closing = true
 
-		// TODO: Log the last_indexedheight as last_indexedheight - 1
+		// TODO: Log the last_indexedheight
 
 		// Add 1 second sleep prior to closing to prevent db writing issues
 		time.Sleep(time.Second)
