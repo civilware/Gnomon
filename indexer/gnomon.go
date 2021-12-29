@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/civilware/Gnomon/graviton"
@@ -53,11 +56,14 @@ var rpc_client = &Client{}
 var daemon_endpoint string
 var blid string
 var Connected bool = false
+var Closing bool = false
 var chain_topoheight int64
 var last_indexedheight int64
 
 func main() {
 	var err error
+
+	SetupCloseHandler()
 
 	// Initial set to 1 as topoheight 0 doesn't exist
 	last_indexedheight = 1
@@ -105,6 +111,11 @@ func main() {
 	time.Sleep(1 * time.Second)
 
 	for {
+		if Closing {
+			// Holds in place until SetupCloseHandler() syncs and exits out
+			select {}
+		}
+
 		if last_indexedheight == chain_topoheight {
 			time.Sleep(1 * time.Second)
 			continue
@@ -290,4 +301,26 @@ func (client *Client) getInfo() {
 
 		time.Sleep(5 * time.Second)
 	}
+}
+
+// SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
+// program if it receives an interrupt from the OS. We then handle this by calling
+// our clean up procedure and exiting the program.
+// Reference: https://golangcode.com/handle-ctrl-c-exit-in-terminal/
+func SetupCloseHandler() {
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		log.Printf("\r- Ctrl+C pressed in Terminal")
+		log.Printf("Closing - syncing stats...")
+		Closing = true
+
+		// TODO: Log the last_indexedheight as last_indexedheight - 1
+
+		// Add 1 second sleep prior to closing to prevent db writing issues
+		time.Sleep(time.Second)
+		//Graviton_backend.DB.Close()
+		os.Exit(0)
+	}()
 }
