@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +45,8 @@ Usage:
 
 Options:
   -h --help     Show this screen.
-  --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon`
+  --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon
+  --start-topoheight=<31170>	define a start topoheight other than 1 if required to index at a higher block (pruned db etc.)`
 
 var rpc_client = &Client{}
 
@@ -75,6 +77,13 @@ func main() {
 	}
 
 	log.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_endpoint)
+
+	if arguments["--start-topoheight"] != nil {
+		last_indexedheight, err = strconv.ParseInt(arguments["--start-topoheight"].(string), 10, 64)
+		if err != nil {
+			log.Fatalf("[Main] ERROR while converting --start-topoheight to int64")
+		}
+	}
 
 	// Database - TODO: Not used or handled yet.. more for testing for the time being
 	shasum := fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
