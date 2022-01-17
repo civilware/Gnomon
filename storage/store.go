@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/civilware/Gnomon/structures"
 	"github.com/deroproject/graviton"
 )
 
@@ -246,6 +248,91 @@ func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 	}
 
 	return results
+}
+
+func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.Parse) error {
+	confBytes, err := json.Marshal(invokedetails)
+	if err != nil {
+		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v", err)
+	}
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreInvokeDetails] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	// Tree - SCID // (either string or hex - will be []byte in graviton anyways.. may just go with hex)
+	// Key - sender:topoheight:entrypoint // (We know that we can have 1 sender per scid per topoheight - do we need entrypoint appended? does it matter?)
+	tree, _ := ss.GetTree(scid)
+	key := signer + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
+	tree.Put([]byte(key), confBytes) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Returns all scinvoke calls from a given scid_hex
+func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*structures.Parse) {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0)
+	tree, _ := ss.GetTree(scid)
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+		var currdetails *structures.Parse
+		_ = json.Unmarshal(v, &currdetails)
+		invokedetails = append(invokedetails, currdetails)
+	}
+
+	return invokedetails
+}
+
+// Retruns all scinvoke calls from a given scid_hex that match a given entrypoint
+func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypoint string) (invokedetails []*structures.Parse) {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0)
+	tree, _ := ss.GetTree(scid)
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+		var currdetails *structures.Parse
+		_ = json.Unmarshal(v, &currdetails)
+		if currdetails.Entrypoint == entrypoint {
+			invokedetails = append(invokedetails, currdetails)
+		}
+	}
+
+	return invokedetails
+}
+
+// Retruns all scinvoke calls from a given scid_hex that match a given signer
+func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid_hex []byte, signer string) (invokedetails []*structures.Parse) {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0)
+	tree, _ := ss.GetTree(string(scid_hex))
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+		var currdetails *structures.Parse
+		_ = json.Unmarshal(v, &currdetails)
+		if currdetails.Sender == signer {
+			invokedetails = append(invokedetails, currdetails)
+		}
+	}
+
+	return invokedetails
 }
 
 // ---- End Application Graviton/Backend functions ---- //
