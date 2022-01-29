@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -18,6 +19,7 @@ import (
 	"golang.org/x/xerrors"
 
 	"github.com/chzyer/readline"
+	"github.com/civilware/Gnomon/api"
 	"github.com/civilware/Gnomon/rwc"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
@@ -67,6 +69,8 @@ var chain_topoheight int64
 var last_indexedheight int64
 var search_filter string
 
+var RLI *readline.Instance
+
 var gnomon_count int64
 
 var Graviton_backend *storage.GravitonStore
@@ -78,9 +82,24 @@ var validated_scs []string
 func main() {
 	var err error
 
+	n := runtime.NumCPU()
+	runtime.GOMAXPROCS(n)
+
 	globals.Initialize()
 
 	SetupCloseHandler()
+
+	apic := &structures.APIConfig{
+		Enabled:              true,
+		Listen:               "127.0.0.1:8082",
+		StatsCollectInterval: "5s",
+		SSL:                  false,
+		SSLListen:            "127.0.0.1:9092",
+		CertFile:             "fullchain.cer",
+		KeyFile:              "cert.key",
+	}
+	apis := api.NewApiServer(apic)
+	go apis.Start()
 
 	// Initial set to 1 as topoheight 0 doesn't exist
 	last_indexedheight = 1
@@ -115,7 +134,7 @@ func main() {
 		log.Printf("[Main] No search filter defined.. grabbing all (minus hardcoded scids).")
 	}
 
-	l, err := readline.NewEx(&readline.Config{
+	RLI, err = readline.NewEx(&readline.Config{
 		//Prompt:          "\033[92mGNOMON:\033[32m»\033[0m",
 		Prompt:      "\033[92mGNOMON:\033[32m>>>\033[0m ",
 		HistoryFile: filepath.Join(os.TempDir(), "derod_readline.tmp"),
@@ -130,7 +149,7 @@ func main() {
 		fmt.Printf("Error starting readline err: %s\n", err)
 		return
 	}
-	defer l.Close()
+	defer RLI.Close()
 
 	// Database
 	shasum := fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
@@ -154,21 +173,31 @@ func main() {
 				validated_scs = append(validated_scs, k)
 			}
 
-			log.Printf("[Main] Pre-validated SCIDs appended: %v", validated_scs)
+			//log.Printf("[Main] Pre-validated SCIDs appended: %v", validated_scs)
 		}
+	}
+
+	// TODO: Dynamically get SCIDs of hardcoded SCs and append them
+	validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
+	err = Graviton_backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
+	if err != nil {
+		log.Printf("Error storing owner: %v", err)
 	}
 
 	// Load in the DERO Database for parsing of SIGNER()/TX Senders
 	DeroDB.LoadDeroDB()
 
 	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
-	for {
-		err = Connect()
-		if err != nil {
-			continue
+	go func() {
+		for {
+			err = Connect()
+			if err != nil {
+				continue
+			}
+			break
 		}
-		break
-	}
+	}()
+	time.Sleep(1 * time.Second)
 
 	// Continuously getInfo from daemon to update topoheight globally
 	go rpc_client.getInfo()
@@ -176,7 +205,7 @@ func main() {
 
 	go func() {
 		for {
-			if err = readline_loop(l); err == nil {
+			if err = readline_loop(RLI); err == nil {
 				break
 			}
 		}
@@ -192,11 +221,16 @@ func main() {
 			default:
 			}
 
+			validatedSCIDs := Graviton_backend.GetAllOwnersAndSCIDs()
+			gnomon_count = int64(len(validatedSCIDs))
+
+			currheight := last_indexedheight - 1
+
 			// choose color based on urgency
 			color := "\033[32m" // default is green color
-			if last_indexedheight < chain_topoheight {
+			if currheight < chain_topoheight {
 				color = "\033[33m" // make prompt yellow
-			} else if last_indexedheight > chain_topoheight {
+			} else if currheight > chain_topoheight {
 				color = "\033[31m" // make prompt red
 			}
 
@@ -205,41 +239,54 @@ func main() {
 				gcolor = "\033[33m" // make prompt yellow
 			}
 
-			l.SetPrompt(fmt.Sprintf("\033[1m\033[32mGNOMON: \033[0m"+color+"%d/%d "+gcolor+"G %d>>\033[0m ", last_indexedheight, chain_topoheight, gnomon_count))
-			l.Refresh()
+			RLI.SetPrompt(fmt.Sprintf("\033[1m\033[32mGNOMON: \033[0m"+color+"%d/%d "+gcolor+"G %d>>\033[0m ", currheight, chain_topoheight, gnomon_count))
+			RLI.Refresh()
 			time.Sleep(1 * time.Second)
 		}
 	}()
 
-	for {
-		if Closing {
-			// Holds in place until SetupCloseHandler() syncs and exits out
-			select {}
+	setPasswordCfg := RLI.GenPasswordConfig()
+	setPasswordCfg.SetListener(func(line []rune, pos int, key rune) (newLine []rune, newPos int, ok bool) {
+		RLI.SetPrompt(fmt.Sprintf("Enter password(%v): ", len(line)))
+		RLI.Refresh()
+		return nil, 0, false
+	})
+	RLI.Refresh() // refresh the prompt
+
+	go func() {
+		for {
+			if Closing {
+				// Break out on closing call
+				break
+			}
+
+			if last_indexedheight > chain_topoheight {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			//log.Printf("Checking topoheight %v / %v", last_indexedheight, chain_topoheight)
+
+			blid, err = rpc_client.getBlockHash(uint64(last_indexedheight))
+			if err != nil {
+				log.Printf("[mainFOR] ERROR - %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			err = rpc_client.indexBlock(blid, last_indexedheight)
+			if err != nil {
+				log.Printf("[mainFOR] ERROR - %v", err)
+				time.Sleep(time.Second)
+				continue
+			}
+
+			last_indexedheight++
 		}
+	}()
 
-		if last_indexedheight > chain_topoheight {
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		//log.Printf("Checking topoheight %v / %v", last_indexedheight, chain_topoheight)
-
-		blid, err = rpc_client.getBlockHash(uint64(last_indexedheight))
-		if err != nil {
-			log.Printf("[mainFOR] ERROR - %v", err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-
-		err = rpc_client.indexBlock(blid, last_indexedheight)
-		if err != nil {
-			log.Printf("[mainFOR] ERROR - %v", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		last_indexedheight++
-	}
+	// Hold
+	select {}
 }
 
 func filterInput(r rune) (rune, bool) {
@@ -263,7 +310,7 @@ func readline_loop(l *readline.Instance) (err error) {
 
 	//restart_loop:
 	for {
-		line, err := l.Readline()
+		line, err := RLI.Readline()
 		if err == io.EOF {
 			<-Exit_In_Progress
 			return nil
@@ -286,15 +333,61 @@ func readline_loop(l *readline.Instance) (err error) {
 		if len(line_parts) >= 1 {
 			command = strings.ToLower(line_parts[0])
 		}
-		_ = command
 
 		switch {
+		case command == "listsc":
+			sclist := Graviton_backend.GetAllOwnersAndSCIDs()
+			for k, v := range sclist {
+				log.Printf("SCID: %v ; Owner: %v", k, v)
+			}
+		case command == "listsc_byowner":
+			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
+				sclist := Graviton_backend.GetAllOwnersAndSCIDs()
+				var count int64
+				for k, v := range sclist {
+					if v == line_parts[1] {
+						log.Printf("SCID: %v ; Owner: %v", k, v)
+						invokedetails := Graviton_backend.GetAllSCIDInvokeDetails(k)
+						for _, invoke := range invokedetails {
+							log.Printf("%v", invoke)
+						}
+						count++
+					}
+				}
+
+				if count == 0 {
+					log.Printf("No SCIDs installed by %v", line_parts[1])
+				}
+			} else {
+				log.Printf("listsc_byowner needs a single owner address as argument\n")
+			}
+		case command == "listsc_byscid":
+			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				sclist := Graviton_backend.GetAllOwnersAndSCIDs()
+				var count int64
+				for k, v := range sclist {
+					if k == line_parts[1] {
+						log.Printf("SCID: %v ; Owner: %v", k, v)
+						invokedetails := Graviton_backend.GetAllSCIDInvokeDetails(k)
+						for _, invoke := range invokedetails {
+							log.Printf("%v", invoke)
+						}
+						count++
+					}
+				}
+
+				if count == 0 {
+					log.Printf("No SCIDs installed matching %v", line_parts[1])
+				}
+			} else {
+				log.Printf("listsc_byscid needs a single scid as argument\n")
+			}
 		default:
 			log.Printf("You said: %v", strconv.Quote(line))
 		}
 	}
 
-	return fmt.Errorf("can never reach here")
+	//return fmt.Errorf("can never reach here")
 }
 
 func Connect() (err error) {
@@ -385,14 +478,20 @@ func (client *Client) indexBlock(blid string, topoheight int64) (err error) {
 				scid = string(scid_hex)
 			}
 
-			log.Printf("TX %v is a SC transaction!", bl.Tx_hashes[i])
+			//log.Printf("TX %v is a SC transaction!", bl.Tx_hashes[i])
 
-			// Filter out the scid of the hardcoded name service SC
-			if scid != "0000000000000000000000000000000000000000000000000000000000000001" {
+			if tx.Payloads[0].Statement.RingSize == 2 {
 				sender, err = getTxSender(tx)
 				if err != nil {
 					log.Printf("ERR - Error getting tx sender - %v", err)
 					return err
+				}
+			} else {
+				log.Printf("ERR - Ringsize for %v is != 2. Storing blank value for txid sender.", bl.Tx_hashes[i])
+				//continue
+				if method == "installsc" {
+					// We do not store a ringsize > 2 of installsc calls. Only of SC interactions via sc_invoke for ringsize > 2 and just blank out the sender
+					continue
 				}
 			}
 			//time.Sleep(2 * time.Second)
@@ -403,7 +502,7 @@ func (client *Client) indexBlock(blid string, topoheight int64) (err error) {
 	}
 
 	if len(bl_sctxs) > 0 {
-		log.Printf("Block %v has %v SC txs:", bl.GetHash(), len(bl_sctxs))
+		log.Printf("Block %v has %v SC tx(s).", bl.GetHash(), len(bl_sctxs))
 
 		for i := 0; i < len(bl_sctxs); i++ {
 			if bl_sctxs[i].Method == "installsc" {
@@ -432,15 +531,16 @@ func (client *Client) indexBlock(blid string, topoheight int64) (err error) {
 						log.Printf("Error storing owner: %v", err)
 					}
 
-					owner := Graviton_backend.GetOwner(bl_sctxs[i].Scid)
-					log.Printf("Owner of %v is %v", bl_sctxs[i].Scid, owner)
+					//owner := Graviton_backend.GetOwner(bl_sctxs[i].Scid)
+					//log.Printf("Owner of %v is %v", bl_sctxs[i].Scid, owner)
 				}
 			} else {
 				if scidExist(validated_scs, bl_sctxs[i].Scid) {
 					log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.", bl_sctxs[i].Scid)
 					// TODO: Modify this to be either all entrypoints, just Start, or a subset that is defined in pre-run params
 					//if bl_sctxs[i].entrypoint == "Start" {
-					if bl_sctxs[i].Entrypoint == "InputStr" {
+					//if bl_sctxs[i].Entrypoint == "InputStr" {
+					if true {
 						currsctx := bl_sctxs[i]
 
 						log.Printf("Tx %v matches scinvoke call filter(s). Adding %v to DB.", bl_sctxs[i].Txid, currsctx)
@@ -582,9 +682,18 @@ func getTxSender(tx transaction.Transaction) (string, error) {
 		}
 	}
 
-	address, err := rpc.NewAddressFromCompressedKeys(signer[:])
+	address := &rpc.Address{
+		Mainnet:   false,
+		PublicKey: new(crypto.Point),
+	}
 
-	log.Printf("Signer is: %v", address.String())
+	err = address.PublicKey.DecodeCompressed(signer[0:33])
+
+	if err != nil {
+		return "", fmt.Errorf("Signer decodecompressed issues. err %s\n", err)
+	}
+
+	//log.Printf("Signer is: %v", address.String())
 
 	return address.String(), err
 
@@ -657,23 +766,25 @@ func SetupCloseHandler() {
 			log.Printf("[SetupCloseHandler] ERR - Erorr storing last index height: %v", err)
 		}
 
-		// Temp code just to output a map of installed scids/owners that have been stored
-		log.Printf("[SetupCloseHandler] Printing out a map[string]string of all of the installsc calls and their respective owners:")
-		results := make(map[string]string)
-		results = Graviton_backend.GetAllOwnersAndSCIDs()
-		log.Printf("%v", results)
+		/*
+			// Temp code just to output a map of installed scids/owners that have been stored
+			log.Printf("[SetupCloseHandler] Printing out a map[string]string of all of the installsc calls and their respective owners:")
+			results := make(map[string]string)
+			results = Graviton_backend.GetAllOwnersAndSCIDs()
+			log.Printf("%v", results)
 
-		log.Printf("[SetupCloseHandler] Printing out all invokedetails of b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2")
-		invokedetails := Graviton_backend.GetAllSCIDInvokeDetails("b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2")
-		for _, vd := range invokedetails {
-			log.Printf("%v", vd)
-		}
+			log.Printf("[SetupCloseHandler] Printing out all invokedetails of b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2")
+			invokedetails := Graviton_backend.GetAllSCIDInvokeDetails("b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2")
+			for _, vd := range invokedetails {
+				log.Printf("%v", vd)
+			}
 
-		log.Printf("[SetupCloseHandler] Getting all entrypoint calls of InputStr")
-		invokedetailsentrypoint := Graviton_backend.GetAllSCIDInvokeDetailsByEntrypoint("b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2", "InputStr")
-		for _, vde := range invokedetailsentrypoint {
-			log.Printf("%v", vde)
-		}
+			log.Printf("[SetupCloseHandler] Getting all entrypoint calls of InputStr")
+			invokedetailsentrypoint := Graviton_backend.GetAllSCIDInvokeDetailsByEntrypoint("b27c90e967959d518bce311cc9de8d4990d07058a19ec39e11c8c7a7d93f93f2", "InputStr")
+			for _, vde := range invokedetailsentrypoint {
+				log.Printf("%v", vde)
+			}
+		*/
 
 		// Add 1 second sleep prior to closing to prevent db writing issues
 		time.Sleep(time.Second)
