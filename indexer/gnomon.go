@@ -54,6 +54,9 @@ Usage:
 Options:
   -h --help     Show this screen.
   --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon
+  --api-address=<127.0.0.1:8082>	host api
+  --enable-api-ssl=<false>	enable ssl. Either true/false
+  --api-ssl-address=127.0.0.1:9092>		host ssl api
   --start-topoheight=<31170>	define a start topoheight other than 1 if required to index at a higher block (pruned db etc.)
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc)`
 
@@ -62,6 +65,9 @@ var rpc_client = &Client{}
 var Exit_In_Progress = make(chan bool)
 
 var daemon_endpoint string
+var api_endpoint string
+var api_ssl_endpoint string
+var sslenabled bool
 var blid string
 var Connected bool = false
 var Closing bool = false
@@ -89,18 +95,6 @@ func main() {
 
 	SetupCloseHandler()
 
-	apic := &structures.APIConfig{
-		Enabled:              true,
-		Listen:               "127.0.0.1:8082",
-		StatsCollectInterval: "5s",
-		SSL:                  false,
-		SSLListen:            "127.0.0.1:9092",
-		CertFile:             "fullchain.cer",
-		KeyFile:              "cert.key",
-	}
-	apis := api.NewApiServer(apic)
-	go apis.Start()
-
 	// Initial set to 1 as topoheight 0 doesn't exist
 	last_indexedheight = 1
 
@@ -119,6 +113,21 @@ func main() {
 	}
 
 	log.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_endpoint)
+
+	api_endpoint = "127.0.0.1:8082"
+	if arguments["--api-address"] != nil {
+		api_endpoint = arguments["--api-address"].(string)
+	}
+
+	api_ssl_endpoint = "127.0.0.1:9092"
+	if arguments["--api-ssl-address"] != nil {
+		api_ssl_endpoint = arguments["--api-ssl-address"].(string)
+	}
+
+	if arguments["--enable-api-ssl"] != nil {
+		sslenabled = arguments["--enable-api-ssl"].(bool)
+		log.Printf("Setting API SSL to enabled")
+	}
 
 	if arguments["--start-topoheight"] != nil {
 		last_indexedheight, err = strconv.ParseInt(arguments["--start-topoheight"].(string), 10, 64)
@@ -176,6 +185,19 @@ func main() {
 			//log.Printf("[Main] Pre-validated SCIDs appended: %v", validated_scs)
 		}
 	}
+
+	// API
+	apic := &structures.APIConfig{
+		Enabled:              true,
+		Listen:               api_endpoint,
+		StatsCollectInterval: "5s",
+		SSL:                  sslenabled,
+		SSLListen:            api_ssl_endpoint,
+		CertFile:             "fullchain.cer",
+		KeyFile:              "cert.key",
+	}
+	apis := api.NewApiServer(apic, Graviton_backend)
+	go apis.Start()
 
 	// TODO: Dynamically get SCIDs of hardcoded SCs and append them
 	validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")

@@ -280,7 +280,7 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 	return nil
 }
 
-// Returns all scinvoke calls from a given scid_hex
+// Returns all scinvoke calls from a given scid
 func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*structures.Parse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
@@ -297,7 +297,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*s
 	return invokedetails
 }
 
-// Retruns all scinvoke calls from a given scid_hex that match a given entrypoint
+// Retruns all scinvoke calls from a given scid that match a given entrypoint
 func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypoint string) (invokedetails []*structures.Parse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
@@ -316,11 +316,11 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypo
 	return invokedetails
 }
 
-// Retruns all scinvoke calls from a given scid_hex that match a given signer
-func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid_hex []byte, signer string) (invokedetails []*structures.Parse) {
+// Returns all scinvoke calls from a given scid that match a given signer
+func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signer string) (invokedetails []*structures.Parse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
-	tree, _ := ss.GetTree(string(scid_hex))
+	tree, _ := ss.GetTree(scid)
 
 	c := tree.Cursor()
 	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
