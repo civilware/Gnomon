@@ -54,10 +54,10 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 	}
 
 	if err != nil {
-		log.Printf("Err - Cannot open store: %v", err)
+		log.Printf("Err - Cannot open store: %v\n", err)
 		return err
 	}
-	log.Printf("Initialized: %v", current_path)
+	log.Printf("Initialized: %v\n", current_path)
 
 	return nil
 }
@@ -104,12 +104,12 @@ func (s *Storefs) ReadBlockSnapshotVersion(h [32]byte) (uint64, error) {
 
 // ---- Application Graviton/Backend functions ---- //
 // Builds new Graviton DB based on input from main()
-func NewGravDB(dbtrees []string, dbFolder, dbmigratewait string) *GravitonStore {
+func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
 	var Graviton_backend *GravitonStore = &GravitonStore{}
 
 	current_path, err := os.Getwd()
 	if err != nil {
-		log.Printf("%v", err)
+		log.Printf("%v\n", err)
 	}
 
 	Graviton_backend.DBMigrateWait, _ = time.ParseDuration(dbmigratewait)
@@ -120,13 +120,15 @@ func NewGravDB(dbtrees []string, dbFolder, dbmigratewait string) *GravitonStore 
 
 	Graviton_backend.DB, err = graviton.NewDiskStore(Graviton_backend.DBPath)
 	if err != nil {
-		log.Fatalf("[NewGravDB] Could not create db store: %v", err)
+		log.Fatalf("[NewGravDB] Could not create db store: %v\n", err)
 	}
 
 	// Incase we ever need to implement SwapGravDB - an array of dbtrees will be needed to cursor all data since it's at the tree level to ensure proper export/import
-	for i := 0; i < len(dbtrees); i++ {
-		Graviton_backend.DBTrees = append(Graviton_backend.DBTrees, dbtrees[i])
-	}
+	/*
+		for i := 0; i < len(dbtrees); i++ {
+			Graviton_backend.DBTrees = append(Graviton_backend.DBTrees, dbtrees[i])
+		}
+	*/
 
 	return Graviton_backend
 }
@@ -139,7 +141,7 @@ func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[StoreLastIndexHeight] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		log.Printf("[StoreLastIndexHeight] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -149,7 +151,7 @@ func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 	tree.Put([]byte("lastindexedheight"), []byte(topoheight)) // insert a value
 	_, cerr := graviton.Commit(tree)
 	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
 		return cerr
 	}
 	return nil
@@ -161,7 +163,7 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[GetLastIndexHeight] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		log.Printf("[GetLastIndexHeight] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -175,13 +177,13 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 	if v != nil {
 		topoheight, err := strconv.ParseInt(string(v), 10, 64)
 		if err != nil {
-			log.Printf("ERR - Error parsing stored int for lastindexheight: %v", err)
+			log.Printf("ERR - Error parsing stored int for lastindexheight: %v\n", err)
 			return 0
 		}
 		return topoheight
 	}
 
-	log.Printf("[GetLastIndexHeight] No last index height. Starting from 0")
+	log.Printf("[GetLastIndexHeight] No last index height. Starting from 0\n")
 
 	return 0
 }
@@ -192,7 +194,7 @@ func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[StoreOwner] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		log.Printf("[StoreOwner] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -202,7 +204,7 @@ func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 	tree.Put([]byte(scid), []byte(owner)) // insert a value
 	_, cerr := graviton.Commit(tree)
 	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
 		return cerr
 	}
 	return nil
@@ -214,7 +216,7 @@ func (g *GravitonStore) GetOwner(scid string) string {
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[GetOwner] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		log.Printf("[GetOwner] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -229,7 +231,7 @@ func (g *GravitonStore) GetOwner(scid string) string {
 		return string(v)
 	}
 
-	log.Printf("[GetOwner] No owner for %v", scid)
+	log.Printf("[GetOwner] No owner for %v\n", scid)
 
 	return ""
 }
@@ -253,7 +255,7 @@ func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.Parse) error {
 	confBytes, err := json.Marshal(invokedetails)
 	if err != nil {
-		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v", err)
+		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v\n", err)
 	}
 
 	store := g.DB
@@ -261,7 +263,7 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[StoreInvokeDetails] G is migrating... sleeping for %v...", g.DBMigrateWait)
+		log.Printf("[StoreInvokeDetails] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -274,7 +276,7 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 	tree.Put([]byte(key), confBytes) // insert a value
 	_, cerr := graviton.Commit(tree)
 	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
 		return cerr
 	}
 	return nil

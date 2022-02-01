@@ -30,7 +30,7 @@ func (apiServer *ApiServer) Start() {
 
 	apiServer.StatsIntv, _ = time.ParseDuration(apiServer.Config.StatsCollectInterval)
 	statsTimer := time.NewTimer(apiServer.StatsIntv)
-	log.Printf("[API] Set stats collect interval to %v", apiServer.StatsIntv)
+	log.Printf("[API] Set stats collect interval to %v\n", apiServer.StatsIntv)
 
 	apiServer.collectStats()
 
@@ -54,26 +54,26 @@ func (apiServer *ApiServer) Start() {
 }
 
 func (apiServer *ApiServer) listen() {
-	log.Printf("[API] Starting API on %v", apiServer.Config.Listen)
+	log.Printf("[API] Starting API on %v\n", apiServer.Config.Listen)
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
 	if err != nil {
-		log.Fatalf("[API] Failed to start API: %v", err)
+		log.Fatalf("[API] Failed to start API: %v\n", err)
 	}
 }
 
 func (apiServer *ApiServer) listenSSL() {
-	log.Printf("[API] Starting SSL API on %v", apiServer.Config.SSLListen)
+	log.Printf("[API] Starting SSL API on %v\n", apiServer.Config.SSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
 	if err != nil {
-		log.Fatalf("[API] Failed to start SSL API: %v", err)
+		log.Fatalf("[API] Failed to start SSL API: %v\n", err)
 	}
 }
 
@@ -114,7 +114,7 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v", err)
+		log.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -140,7 +140,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		log.Printf("URL Param 'scid' is missing. Debugging only.")
+		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -149,7 +149,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		log.Printf("URL Param 'address' is missing.")
+		log.Printf("URL Param 'address' is missing.\n")
 	} else {
 		address = addresskeys[0]
 	}
@@ -189,7 +189,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v", err)
+		log.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 

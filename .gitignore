@@ -1,4 +1,5 @@
 */*Gnomon_*
+GNOMON_*
 */testnet
-*/*.exe
-/indexer/indexer
+testnet*
+*.exe
