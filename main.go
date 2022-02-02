@@ -27,6 +27,7 @@ type GnomonServer struct {
 	LastIndexedHeight int64
 	SearchFilters     []string
 	Indexers          map[string]*indexer.Indexer
+	Closing           bool
 }
 
 var command_line string = `Gnomon
@@ -51,13 +52,9 @@ var daemon_endpoint string
 var api_endpoint string
 var api_ssl_endpoint string
 var sslenabled bool
-var Connected bool = false
-var Closing bool = false
 var search_filter string
 
 var RLI *readline.Instance
-
-var gnomon_count int64
 
 var Gnomon = &GnomonServer{}
 
@@ -141,15 +138,6 @@ func main() {
 	go defaultIndexer.Start()
 	Gnomon.Indexers[search_filter] = defaultIndexer
 
-	// Probably not the best way to do it... should branch it out to be an accessible Closing call/function for all in some capacity (probably Gnomon.Indexers[] selection of sorts)
-	go func() {
-		for {
-			if Closing == true {
-				defaultIndexer.Closing = true
-			}
-		}
-	}()
-
 	// Setup ctrl+c exit
 	SetupCloseHandler(Graviton_backend, defaultIndexer)
 
@@ -184,13 +172,13 @@ func main() {
 		for {
 			select {
 			case <-Exit_In_Progress:
-				Closing = true
+				Gnomon.close()
 				return
 			default:
 			}
 
 			validatedSCIDs := Graviton_backend.GetAllOwnersAndSCIDs()
-			gnomon_count = int64(len(validatedSCIDs))
+			gnomon_count := int64(len(validatedSCIDs))
 
 			currheight := defaultIndexer.LastIndexedHeight - 1
 
@@ -255,7 +243,7 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				log.Printf("Ctrl-C received, ending loop. Hit it again to exit the program (This will be fixed..)\n")
-				Closing = true
+				Gnomon.close()
 				return nil
 			} else {
 				continue
@@ -326,6 +314,13 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 	//return fmt.Errorf("can never reach here")
 }
 
+func (g *GnomonServer) close() {
+	g.Closing = true
+	for _, v := range g.Indexers {
+		v.Closing = true
+	}
+}
+
 // SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
 // program if it receives an interrupt from the OS. We then handle this by calling
 // our clean up procedure and exiting the program.
@@ -337,7 +332,8 @@ func SetupCloseHandler(Graviton_backend *storage.GravitonStore, defaultIndexer *
 		<-c
 		log.Printf("\r- Ctrl+C pressed in Terminal\n")
 		log.Printf("[SetupCloseHandler] Closing - syncing stats...\n")
-		Closing = true
+
+		Gnomon.close()
 
 		time.Sleep(time.Second)
 
