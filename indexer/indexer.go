@@ -51,11 +51,13 @@ var DeroDB *storage.Derodbstore = &storage.Derodbstore{}
 func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, daemon_endpoint string) *Indexer {
 	var err error
 
-	// TODO: Dynamically get SCIDs of hardcoded SCs and append them
-	validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
-	err = Graviton_backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
-	if err != nil {
-		log.Printf("Error storing owner: %v\n", err)
+	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
+	if search_filter == "" {
+		validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
+		err = Graviton_backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
+		if err != nil {
+			log.Printf("Error storing owner: %v\n", err)
+		}
 	}
 
 	storedindex := Graviton_backend.GetLastIndexHeight()

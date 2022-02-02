@@ -19,7 +19,6 @@ import (
 	"github.com/civilware/Gnomon/indexer"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
-	"github.com/deroproject/derohe/globals"
 	"github.com/docopt/docopt-go"
 )
 
@@ -28,6 +27,7 @@ type GnomonServer struct {
 	SearchFilters     []string
 	Indexers          map[string]*indexer.Indexer
 	Closing           bool
+	DaemonEndpoint    string
 }
 
 var command_line string = `Gnomon
@@ -39,12 +39,12 @@ Usage:
 
 Options:
   -h --help     Show this screen.
-  --daemon-rpc-address=<127.0.0.1:40402>	connect to daemon
-  --api-address=<127.0.0.1:8082>	host api
-  --enable-api-ssl=<false>	enable ssl. Either true/false
-  --api-ssl-address=127.0.0.1:9092>		host ssl api
-  --start-topoheight=<31170>	define a start topoheight other than 1 if required to index at a higher block (pruned db etc.)
-  --search-filter=<"Function InputStr(input String, varname String) Uint64">	defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc)`
+  --daemon-rpc-address=<127.0.0.1:40402>	Connect to daemon.
+  --api-address=<127.0.0.1:8082>	Host api.
+  --enable-api-ssl=<false>	Enable ssl.
+  --api-ssl-address=<127.0.0.1:9092>		Host ssl api.
+  --start-topoheight=<31170>	Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
+  --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).`
 
 var Exit_In_Progress = make(chan bool)
 
@@ -53,6 +53,7 @@ var api_endpoint string
 var api_ssl_endpoint string
 var sslenabled bool
 var search_filter string
+var version = "0.1a"
 
 var RLI *readline.Instance
 
@@ -64,13 +65,12 @@ func main() {
 	n := runtime.NumCPU()
 	runtime.GOMAXPROCS(n)
 
-	globals.Initialize()
+	//globals.Initialize()
 
 	Gnomon.Indexers = make(map[string]*indexer.Indexer)
 
 	// Inspect argument(s)
-	var arguments map[string]interface{}
-	arguments, err = docopt.Parse(command_line, nil, true, "Gnomon : work in progress", false)
+	arguments, err := docopt.ParseArgs(command_line, nil, version)
 
 	if err != nil {
 		log.Fatalf("[Main] Error while parsing arguments err: %s\n", err)
@@ -81,6 +81,7 @@ func main() {
 	if arguments["--daemon-rpc-address"] != nil {
 		daemon_endpoint = arguments["--daemon-rpc-address"].(string)
 	}
+	Gnomon.DaemonEndpoint = daemon_endpoint
 
 	log.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_endpoint)
 
@@ -95,8 +96,10 @@ func main() {
 	}
 
 	if arguments["--enable-api-ssl"] != nil {
-		sslenabled = arguments["--enable-api-ssl"].(bool)
-		log.Printf("Setting API SSL to enabled\n")
+		sslenablestr := arguments["--enable-api-ssl"].(string)
+		if sslenablestr == "true" {
+			sslenabled = true
+		}
 	}
 
 	last_indexedheight := int64(1)
@@ -115,8 +118,13 @@ func main() {
 	}
 
 	// Database
-	shasum := fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
-	db_folder := fmt.Sprintf("%s_%s", "GNOMON", shasum)
+	var shasum string
+	if search_filter == "" {
+		shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
+	} else {
+		shasum = fmt.Sprintf("%x", sha1.Sum([]byte(search_filter)))
+	}
+	db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
 	Graviton_backend := storage.NewGravDB(db_folder, "25ms")
 
 	// API
@@ -264,6 +272,23 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 			for k, v := range sclist {
 				log.Printf("SCID: %v ; Owner: %v\n", k, v)
 			}
+		case command == "new_searchfilter":
+			if len(line_parts) >= 2 {
+				nsf := strings.Join(line_parts[1:], " ")
+				log.Printf("Adding new searchfilter '%v'\n", nsf)
+
+				// Database
+				nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
+				nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
+				log.Printf("Adding new database '%v'\n", nDBFolder)
+				nBackend := storage.NewGravDB(nDBFolder, "25ms")
+
+				// Start default indexer based on search_filter params
+				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(Gnomon.Indexers)+1, nsf)
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint)
+				go nIndexer.Start()
+				Gnomon.Indexers[nsf] = nIndexer
+			}
 		case command == "listsc_byowner":
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
 				sclist := Graviton_backend.GetAllOwnersAndSCIDs()
@@ -318,6 +343,10 @@ func (g *GnomonServer) close() {
 	g.Closing = true
 	for _, v := range g.Indexers {
 		v.Closing = true
+		err := v.Backend.StoreLastIndexHeight(v.LastIndexedHeight)
+		if err != nil {
+			log.Printf("[close] ERR - Error storing last index height of search_filter '%v' : %v\n", v.SearchFilter, err)
+		}
 	}
 }
 
@@ -336,12 +365,6 @@ func SetupCloseHandler(Graviton_backend *storage.GravitonStore, defaultIndexer *
 		Gnomon.close()
 
 		time.Sleep(time.Second)
-
-		// Log the last_indexedheight
-		err := Graviton_backend.StoreLastIndexHeight(defaultIndexer.LastIndexedHeight)
-		if err != nil {
-			log.Printf("[SetupCloseHandler] ERR - Erorr storing last index height: %v\n", err)
-		}
 
 		// Add 1 second sleep prior to closing to prevent db writing issues
 		time.Sleep(time.Second)
