@@ -33,12 +33,13 @@ type Client struct {
 
 type Indexer struct {
 	LastIndexedHeight int64
-	ChainTopoHeight   int64
+	ChainHeight       int64
 	SearchFilter      string
 	Backend           *storage.GravitonStore
 	Closing           bool
 	RPC               *Client
-	DaemonEndpoint    string
+	Endpoint          string
+	RunMode           string
 }
 
 var daemon_endpoint string
@@ -48,7 +49,7 @@ var chain_topoheight int64
 
 var DeroDB *storage.Derodbstore = &storage.Derodbstore{}
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, daemon_endpoint string) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string) *Indexer {
 	var err error
 
 	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
@@ -83,24 +84,31 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, l
 		SearchFilter:      search_filter,
 		Backend:           Graviton_backend,
 		RPC:               &Client{},
-		DaemonEndpoint:    daemon_endpoint,
+		Endpoint:          endpoint,
+		RunMode:           runmode,
 	}
 }
 
-func (indexer *Indexer) Start() {
+func (indexer *Indexer) StartDaemonMode() {
 	var err error
 
 	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
-	go func() {
-		for {
-			err = indexer.RPC.Connect(indexer.DaemonEndpoint)
-			if err != nil {
-				continue
-			}
+	//go func() {
+	for {
+		if indexer.Closing {
+			// Break out on closing call
 			break
 		}
-	}()
+		log.Printf("Trying to connect...")
+		err = indexer.RPC.Connect(indexer.Endpoint)
+		if err != nil {
+			continue
+		}
+		break
+	}
+	//}()
 	time.Sleep(1 * time.Second)
+	//log.Printf("%v", indexer.RPC.WS)
 
 	// Continuously getInfo from daemon to update topoheight globally
 	go indexer.getInfo()
@@ -113,7 +121,7 @@ func (indexer *Indexer) Start() {
 				break
 			}
 
-			if indexer.LastIndexedHeight > indexer.ChainTopoHeight {
+			if indexer.LastIndexedHeight > indexer.ChainHeight {
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -137,24 +145,73 @@ func (indexer *Indexer) Start() {
 	}()
 
 	// Hold
+	//select {}
+}
+
+func (indexer *Indexer) StartWalletMode(runType string) {
+	var err error
+
+	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
+	go func() {
+		for {
+			err = indexer.RPC.Connect(indexer.Endpoint)
+			if err != nil {
+				continue
+			}
+			break
+		}
+	}()
+	time.Sleep(1 * time.Second)
+
+	// Continuously getInfo from daemon to update topoheight globally
+	switch runType {
+	case "receive":
+		// do receive actions here (e.g. from data source via API/WS)
+		// TODO: is there anything we need to do within indexer itself if just receiving?
+	default:
+		// 'retrieve'/etc.
+		go indexer.getWalletHeight()
+		time.Sleep(1 * time.Second)
+
+		go func() {
+			for {
+				if indexer.Closing {
+					// Break out on closing call
+					break
+				}
+
+				if indexer.LastIndexedHeight > indexer.ChainHeight {
+					time.Sleep(1 * time.Second)
+					continue
+				}
+
+				// Do indexing calls here
+
+				// TODO: Modify this to be the height of the *next* tx index etc.
+				indexer.LastIndexedHeight++
+			}
+		}()
+	}
+
+	// Hold
 	select {}
 }
 
-func (client *Client) Connect(daemon_endpoint string) (err error) {
-	client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+daemon_endpoint+"/ws", nil)
+func (client *Client) Connect(endpoint string) (err error) {
+	client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+endpoint+"/ws", nil)
 
 	// notify user of any state change
 	// if daemon connection breaks or comes live again
 	if err == nil {
 		if !Connected {
-			log.Printf("[Connect] Connection to RPC server successful - ws://%s/ws\n", daemon_endpoint)
+			log.Printf("[Connect] Connection to RPC server successful - ws://%s/ws\n", endpoint)
 			Connected = true
 		}
 	} else {
 		log.Printf("[Connect] ERROR connecting to daemon %v\n", err)
 
 		if Connected {
-			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws\n", daemon_endpoint)
+			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws\n", endpoint)
 		}
 		Connected = false
 		return err
@@ -475,22 +532,74 @@ func (client *Client) getBlockHash(height uint64) (hash string, err error) {
 // Looped interval to probe DERO.GetInfo rpc call for updating chain topoheight
 func (indexer *Indexer) getInfo() {
 	for {
+		if indexer.Closing {
+			// Break out on closing call
+			break
+		}
 		var err error
 
-		var info rpc.GetInfo_Result
+		//var info rpc.GetInfo_Result
+		var info *structures.GetInfo
 
 		// collect all the data afresh,  execute rpc to service
 		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetInfo", nil, &info); err != nil {
 			log.Printf("[getInfo] ERROR - GetInfo failed: %v\n", err)
 			time.Sleep(1 * time.Second)
-			indexer.RPC.Connect(indexer.DaemonEndpoint) // Attempt to re-connect now
+			indexer.RPC.Connect(indexer.Endpoint) // Attempt to re-connect now
 			continue
 		} else {
 			//mainnet = !info.Testnet // inverse of testnet is mainnet
 			//log.Printf("%v\n", info)
 		}
 
-		indexer.ChainTopoHeight = info.TopoHeight
+		currStoreGetInfo := indexer.Backend.GetGetInfoDetails()
+		if currStoreGetInfo != nil {
+			if currStoreGetInfo.Height < info.Height {
+				var structureGetInfo *structures.GetInfo
+				structureGetInfo = info
+				err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
+				if err != nil {
+					log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
+				}
+			}
+		} else {
+			var structureGetInfo *structures.GetInfo
+			structureGetInfo = info
+			err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
+			if err != nil {
+				log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
+			}
+		}
+
+		indexer.ChainHeight = info.TopoHeight
+
+		time.Sleep(5 * time.Second)
+	}
+}
+
+// Looped interval to probe WALLET.GetHeight rpc call for updating wallet height
+func (indexer *Indexer) getWalletHeight() {
+	for {
+		if indexer.Closing {
+			// Break out on closing call
+			break
+		}
+		var err error
+
+		var info rpc.GetHeight_Result
+
+		// collect all the data afresh,  execute rpc to service
+		if err = indexer.RPC.RPC.CallResult(context.Background(), "WALLET.GetHeight", nil, &info); err != nil {
+			log.Printf("[getInfo] ERROR - GetHeight failed: %v\n", err)
+			time.Sleep(1 * time.Second)
+			indexer.RPC.Connect(indexer.Endpoint) // Attempt to re-connect now
+			continue
+		} else {
+			//mainnet = !info.Testnet // inverse of testnet is mainnet
+			//log.Printf("%v\n", info)
+		}
+
+		indexer.ChainHeight = int64(info.Height)
 
 		time.Sleep(5 * time.Second)
 	}

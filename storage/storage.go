@@ -337,4 +337,53 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signer stri
 	return invokedetails
 }
 
+// Stores simple getinfo polling from the daemon
+func (g *GravitonStore) StoreGetInfoDetails(getinfo *structures.GetInfo) error {
+	confBytes, err := json.Marshal(getinfo)
+	if err != nil {
+		return fmt.Errorf("[StoreGetInfoDetails] could not marshal getinfo info: %v\n", err)
+	}
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreGetInfoDetails] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("getinfo")
+	key := "getinfo"
+	tree.Put([]byte(key), confBytes) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Returns simple getinfo polling from the daemon
+func (g *GravitonStore) GetGetInfoDetails() *structures.GetInfo {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	tree, _ := ss.GetTree("getinfo") // use or create tree named by poolhost in config
+	key := "getinfo"
+
+	var getinfo *structures.GetInfo
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &getinfo)
+		return getinfo
+	}
+
+	return nil
+}
+
 // ---- End Application Graviton/Backend functions ---- //

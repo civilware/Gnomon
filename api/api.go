@@ -47,7 +47,8 @@ func (apiServer *ApiServer) Start() {
 	// If SSL is configured, due to nature of listenandserve, put HTTP in go routine then call SSL afterwards so they can run in parallel. Otherwise, run http as normal
 	if apiServer.Config.SSL {
 		go apiServer.listen()
-		apiServer.listenSSL()
+		go apiServer.listenSSL()
+		apiServer.getInfoListenSSL()
 	} else {
 		apiServer.listen()
 	}
@@ -58,6 +59,7 @@ func (apiServer *ApiServer) listen() {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
+	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
 	if err != nil {
@@ -70,10 +72,22 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
+	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
 	if err != nil {
 		log.Fatalf("[API] Failed to start SSL API: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) getInfoListenSSL() {
+	log.Printf("[API] Starting GetInfo SSL API on %v\n", apiServer.Config.GetInfoSSLListen)
+	routerSSL := mux.NewRouter()
+	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
+	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
+	err := http.ListenAndServeTLS(apiServer.Config.GetInfoSSLListen, apiServer.Config.GetInfoCertFile, apiServer.Config.GetInfoKeyFile, routerSSL)
+	if err != nil {
+		log.Fatalf("[API] Failed to start GetInfo SSL API: %v\n", err)
 	}
 }
 
@@ -186,6 +200,23 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		// If no address and scid only, return invokes of scid
 		reply["scidinvokes"] = apiServer.Backend.GetAllSCIDInvokeDetails(scid)
 	}
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) GetInfo(writer http.ResponseWriter, _ *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	info := apiServer.Backend.GetGetInfoDetails()
+	reply["getinfo"] = info
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {

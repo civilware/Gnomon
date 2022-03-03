@@ -23,6 +23,11 @@ type APIConfig struct {
 	Blocks               int64  `json:"blocks"`
 	SSL                  bool   `json:"ssl"`
 	SSLListen            string `json:"sslListen"`
+	GetInfoSSLListen     string `json:"getInfoSSLListen"`
 	CertFile             string `json:"certFile"`
+	GetInfoCertFile      string `json:"getInfoCertFile"`
 	KeyFile              string `json:"keyFile"`
+	GetInfoKeyFile       string `json:"getInfoKeyFile"`
 }
+
+type GetInfo rpc.GetInfo_Result

@@ -28,6 +28,7 @@ type GnomonServer struct {
 	Indexers          map[string]*indexer.Indexer
 	Closing           bool
 	DaemonEndpoint    string
+	RunMode           string
 }
 
 var command_line string = `Gnomon
@@ -43,14 +44,17 @@ Options:
   --api-address=<127.0.0.1:8082>	Host api.
   --enable-api-ssl=<false>	Enable ssl.
   --api-ssl-address=<127.0.0.1:9092>		Host ssl api.
+  --get-info-ssl-address=<127.0.0.1:9394>	Host GetInfo ssl api. This is to completely isolate it from gnomon api results as a whole. Normal api endpoints also surface the getinfo call if needed.
   --start-topoheight=<31170>	Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
-  --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).`
+  --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
+  --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).`
 
 var Exit_In_Progress = make(chan bool)
 
 var daemon_endpoint string
 var api_endpoint string
 var api_ssl_endpoint string
+var get_info_ssl_endpoint string
 var sslenabled bool
 var search_filter string
 var version = "0.1a"
@@ -95,10 +99,25 @@ func main() {
 		api_ssl_endpoint = arguments["--api-ssl-address"].(string)
 	}
 
+	get_info_ssl_endpoint = "127.0.0.1:9394"
+	if arguments["--get-info-ssl-address"] != nil {
+		get_info_ssl_endpoint = arguments["--get-info-ssl-address"].(string)
+	}
+
 	if arguments["--enable-api-ssl"] != nil {
 		sslenablestr := arguments["--enable-api-ssl"].(string)
 		if sslenablestr == "true" {
 			sslenabled = true
+		}
+	}
+
+	Gnomon.RunMode = "daemon"
+	if arguments["--runmode"] != nil {
+		if arguments["--runmode"] == "daemon" || arguments["--runmode"] == "wallet" {
+			Gnomon.RunMode = arguments["--runmode"].(string)
+		} else {
+			log.Printf("ERR - Runmode must be either 'daemon' or 'wallet'")
+			return
 		}
 	}
 
@@ -134,16 +153,25 @@ func main() {
 		StatsCollectInterval: "5s",
 		SSL:                  sslenabled,
 		SSLListen:            api_ssl_endpoint,
+		GetInfoSSLListen:     get_info_ssl_endpoint,
 		CertFile:             "fullchain.cer",
+		GetInfoCertFile:      "getinfofullchain.cer",
 		KeyFile:              "cert.key",
+		GetInfoKeyFile:       "getinfocert.key",
 	}
 	// TODO: Add default search filter index of sorts, rather than passing through Graviton_backend object as a whole
 	apis := api.NewApiServer(apic, Graviton_backend)
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint)
-	go defaultIndexer.Start()
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode)
+
+	switch Gnomon.RunMode {
+	case "daemon":
+		go defaultIndexer.StartDaemonMode()
+	default:
+		go defaultIndexer.StartDaemonMode()
+	}
 	Gnomon.Indexers[search_filter] = defaultIndexer
 
 	// Setup ctrl+c exit
@@ -192,9 +220,9 @@ func main() {
 
 			// choose color based on urgency
 			color := "\033[32m" // default is green color
-			if currheight < defaultIndexer.ChainTopoHeight {
+			if currheight < defaultIndexer.ChainHeight {
 				color = "\033[33m" // make prompt yellow
-			} else if currheight > defaultIndexer.ChainTopoHeight {
+			} else if currheight > defaultIndexer.ChainHeight {
 				color = "\033[31m" // make prompt red
 			}
 
@@ -203,7 +231,7 @@ func main() {
 				gcolor = "\033[33m" // make prompt yellow
 			}
 
-			RLI.SetPrompt(fmt.Sprintf("\033[1m\033[32mGNOMON \033[0m"+color+"[%d/%d] "+gcolor+"R:%d G:%d >>\033[0m ", currheight, defaultIndexer.ChainTopoHeight, gnomon_count, len(Gnomon.Indexers)))
+			RLI.SetPrompt(fmt.Sprintf("\033[1m\033[32mGNOMON \033[0m"+color+"[%d/%d] "+gcolor+"R:%d G:%d >>\033[0m ", currheight, defaultIndexer.ChainHeight, gnomon_count, len(Gnomon.Indexers)))
 			RLI.Refresh()
 			time.Sleep(1 * time.Second)
 		}
@@ -285,8 +313,8 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(Gnomon.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint)
-				go nIndexer.Start()
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint, Gnomon.RunMode)
+				go nIndexer.StartDaemonMode()
 				Gnomon.Indexers[nsf] = nIndexer
 			}
 		case command == "listsc_byowner":
