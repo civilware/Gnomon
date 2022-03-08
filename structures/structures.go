@@ -30,4 +30,9 @@ type APIConfig struct {
 	GetInfoKeyFile       string `json:"getInfoKeyFile"`
 }
 
+type SCIDVariable struct {
+	Key   string
+	Value string
+}
+
 type GetInfo rpc.GetInfo_Result

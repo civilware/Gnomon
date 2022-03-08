@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/civilware/Gnomon/structures"
@@ -24,83 +23,6 @@ type GravitonStore struct {
 	DBMigrateWait time.Duration
 	Writing       int
 }
-
-// ---- DERO DB functions ---- //
-type Derodbstore struct {
-	Balance_store  *graviton.Store // stores most critical data, only history can be purged, its merkle tree is stored in the block
-	Block_tx_store Storefs         // stores blocks which can be discarded at any time(only past but keep recent history for rollback)
-	Topo_store     Storetopofs     // stores topomapping which can only be discarded by punching holes in the start of the file
-}
-
-type Storefs struct {
-	Basedir string
-}
-
-type Storetopofs struct {
-	Topomapping *os.File
-}
-
-func (s *Derodbstore) LoadDeroDB() (err error) {
-	// Temp defining for now to same directory as testnet folder - TODO: see if we can natively pull in storage location? I doubt it..
-	current_path, err := os.Getwd()
-	current_path = filepath.Join(current_path, "testnet")
-
-	current_path = filepath.Join(current_path, "balances")
-
-	if s.Balance_store, err = graviton.NewDiskStore(current_path); err == nil {
-		if err = s.Topo_store.Open(current_path); err == nil {
-			s.Block_tx_store.Basedir = current_path
-		}
-	}
-
-	if err != nil {
-		log.Printf("Err - Cannot open store: %v\n", err)
-		return err
-	}
-	log.Printf("Initialized: %v\n", current_path)
-
-	return nil
-}
-
-func (s *Storetopofs) Open(basedir string) (err error) {
-	s.Topomapping, err = os.OpenFile(filepath.Join(basedir, "topo.map"), os.O_RDWR|os.O_CREATE, 0700)
-	return err
-}
-
-// Different storefs pointers, thus used exported function within. Reference: https://github.com/deroproject/derohe/blob/main/blockchain/storefs.go#L124
-func (s *Storefs) ReadBlockSnapshotVersion(h [32]byte) (uint64, error) {
-	dir := filepath.Join(filepath.Join(s.Basedir, "bltx_store"), fmt.Sprintf("%02x", h[0]), fmt.Sprintf("%02x", h[1]), fmt.Sprintf("%02x", h[2]))
-
-	files, err := os.ReadDir(dir) // this always returns the sorted list
-	if err != nil {
-		return 0, err
-	}
-	// windows has a caching issue, so earlier versions may exist at the same time
-	// so we mitigate it, by using the last version, below 3 lines reverse the already sorted arrray
-	for left, right := 0, len(files)-1; left < right; left, right = left+1, right-1 {
-		files[left], files[right] = files[right], files[left]
-	}
-
-	filename_start := fmt.Sprintf("%x.block", h[:])
-	for _, file := range files {
-		if strings.HasPrefix(file.Name(), filename_start) {
-			var ssversion uint64
-			parts := strings.Split(file.Name(), "_")
-			if len(parts) != 4 {
-				panic("such filename cannot occur")
-			}
-			_, err := fmt.Sscan(parts[2], &ssversion)
-			if err != nil {
-				return 0, err
-			}
-			return ssversion, nil
-		}
-	}
-
-	return 0, os.ErrNotExist
-}
-
-// ---- End DERO DB functions ---- //
 
 // ---- Application Graviton/Backend functions ---- //
 // Builds new Graviton DB based on input from main()
@@ -133,6 +55,7 @@ func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
 	return Graviton_backend
 }
 
+// Stores gnomon's last indexed height - this is for stateful stores on close and reference on open
 func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
@@ -157,6 +80,7 @@ func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 	return nil
 }
 
+// Gets gnomon's last indexed height - this is for stateful stores on close and reference on open
 func (g *GravitonStore) GetLastIndexHeight() int64 {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
@@ -188,6 +112,7 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 	return 0
 }
 
+// Stores the owner (who deployed it) of a given scid
 func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
@@ -210,6 +135,7 @@ func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 	return nil
 }
 
+// Returns the owner (who deployed it) of a given scid
 func (g *GravitonStore) GetOwner(scid string) string {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
@@ -236,6 +162,7 @@ func (g *GravitonStore) GetOwner(scid string) string {
 	return ""
 }
 
+// Returns all of the deployed SCIDs with their corresponding owners (who deployed it)
 func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 	results := make(map[string]string)
 
@@ -252,6 +179,7 @@ func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 	return results
 }
 
+// Stores all scinvoke details of a given scid
 func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.Parse) error {
 	confBytes, err := json.Marshal(invokedetails)
 	if err != nil {
@@ -384,6 +312,78 @@ func (g *GravitonStore) GetGetInfoDetails() *structures.GetInfo {
 	}
 
 	return nil
+}
+
+// Stores SC variables at a given topoheight (called on any new scdeploy or scinvoke actions)
+func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*structures.SCIDVariable, topoheight int64) error {
+	confBytes, err := json.Marshal(variables)
+	if err != nil {
+		return fmt.Errorf("[StoreSCIDVariableDetails] could not marshal getinfo info: %v\n", err)
+	}
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreSCIDVariableDetails] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	treename := scid + "vars"
+	tree, _ := ss.GetTree(treename)
+	key := strconv.FormatInt(topoheight, 10)
+	tree.Put([]byte(key), confBytes) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Gets SC variables at a given topoheight
+func (g *GravitonStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheight int64) []*structures.SCIDVariable {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	treename := scid + "vars"
+	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
+	key := strconv.FormatInt(topoheight, 10)
+
+	var variables []*structures.SCIDVariable
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &variables)
+		return variables
+	}
+
+	return nil
+}
+
+// Gets SC variables at all topoheights
+func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) map[int64][]*structures.SCIDVariable {
+	results := make(map[int64][]*structures.SCIDVariable)
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0)
+	treename := scid + "vars"
+	tree, _ := ss.GetTree(treename)
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for k, v, err := c.First(); err == nil; k, v, err = c.Next() {
+		topoheight, _ := strconv.ParseInt(string(k), 10, 64)
+		var variables []*structures.SCIDVariable
+		_ = json.Unmarshal(v, &variables)
+		results[topoheight] = variables
+	}
+
+	return results
 }
 
 // ---- End Application Graviton/Backend functions ---- //

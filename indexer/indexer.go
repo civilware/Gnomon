@@ -8,18 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/xerrors"
-
 	"github.com/civilware/Gnomon/rwc"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 
 	"github.com/deroproject/derohe/block"
-	"github.com/deroproject/derohe/cryptography/bn256"
-	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
-	"github.com/deroproject/graviton"
 
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
@@ -46,8 +41,6 @@ var daemon_endpoint string
 var Connected bool = false
 var validated_scs []string
 var chain_topoheight int64
-
-var DeroDB *storage.Derodbstore = &storage.Derodbstore{}
 
 func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string) *Indexer {
 	var err error
@@ -282,18 +275,6 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 			if tx.Payloads[0].Statement.RingSize == 2 {
 				sender = output.Txs[0].Signer
-				/*
-					if sender == "" {
-						sender, err = getTxSender(tx)
-						if err != nil {
-							log.Printf("ERR - Error getting tx sender - %v\n", err)
-							return err
-						}
-						log.Printf("TEMP - Received sender from getTxSender(tx).\n")
-					} else {
-						log.Printf("TEMP - Received sender from output.Txs[0].Signer\n")
-					}
-				*/
 			} else {
 				log.Printf("ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
 				//continue
@@ -339,8 +320,9 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						log.Printf("Error storing owner: %v\n", err)
 					}
 
-					//owner := Graviton_backend.GetOwner(bl_sctxs[i].Scid)
-					//log.Printf("Owner of %v is %v", bl_sctxs[i].Scid, owner)
+					// Gets the SC variables (key/value) at a given topoheight and then stores them
+					scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
+					Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 				}
 			} else {
 				if scidExist(validated_scs, bl_sctxs[i].Scid) {
@@ -359,6 +341,10 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 							time.Sleep(5 * time.Second)
 							return err
 						}
+
+						// Gets the SC variables (key/value) at a given topoheight and then stores them
+						scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
+						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 					} else {
 						log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
@@ -383,129 +369,6 @@ func scidExist(s []string, str string) bool {
 	}
 
 	return false
-}
-
-// Uses a transaction to find the tx sender/signer of a ringsize 2 SC transaction by querying DERO Chain DB
-func getTxSender(tx transaction.Transaction) (string, error) {
-
-	// ----- Start publickeylist expansion ----- //
-	// Didn't use all code, but could add more checks if req'd. Unexportable func also we don't want any balance writes etc. (not that they'd be accepted)
-	// Reference: https://github.com/deroproject/derohe/blob/main/blockchain/transaction_verify.go#L336
-
-	for t := range tx.Payloads {
-		key_map := map[string]bool{}
-		for i := 0; i < int(tx.Payloads[t].Statement.RingSize); i++ {
-			key_map[string(tx.Payloads[t].Statement.Publickeylist_pointers[i*int(tx.Payloads[t].Statement.Bytes_per_publickey):(i+1)*int(tx.Payloads[t].Statement.Bytes_per_publickey)])] = true
-		}
-		if len(key_map) != int(tx.Payloads[t].Statement.RingSize) {
-			return "", fmt.Errorf("key_map does not contain ringsize members, ringsize %d , bytesperkey %d data %x", tx.Payloads[t].Statement.RingSize, tx.Payloads[t].Statement.Bytes_per_publickey, tx.Payloads[t].Statement.Publickeylist_pointers[:])
-		}
-		tx.Payloads[t].Statement.CLn = tx.Payloads[t].Statement.CLn[:0]
-		tx.Payloads[t].Statement.CRn = tx.Payloads[t].Statement.CRn[:0]
-		//log.Printf("Key Map (make sure all are true): %v\n", key_map)
-	}
-
-	// transaction needs to be expanded. this expansion needs balance state
-	version, err := DeroDB.Block_tx_store.ReadBlockSnapshotVersion(tx.BLID)
-
-	ss, err := DeroDB.Balance_store.LoadSnapshot(version)
-
-	var balance_tree *graviton.Tree
-	if balance_tree, err = ss.GetTree("B"); err != nil {
-		return "", err
-	}
-
-	if balance_tree == nil {
-		return "", fmt.Errorf("mentioned balance tree not found, cannot verify TX\n")
-	}
-
-	trees := map[crypto.Hash]*graviton.Tree{}
-
-	var zerohash crypto.Hash
-	trees[zerohash] = balance_tree // initialize main tree by default
-
-	for t := range tx.Payloads {
-		tx.Payloads[t].Statement.Publickeylist_compressed = tx.Payloads[t].Statement.Publickeylist_compressed[:0]
-		tx.Payloads[t].Statement.Publickeylist = tx.Payloads[t].Statement.Publickeylist[:0]
-
-		//log.Printf("Tree: %v\n", balance_tree)
-
-		var tree *graviton.Tree
-
-		if _, ok := trees[tx.Payloads[t].SCID]; ok {
-			tree = trees[tx.Payloads[t].SCID]
-		} else {
-
-			//	fmt.Printf("SCID loading %s tree\n", tx.Payloads[t].SCID)
-			tree, _ = ss.GetTree(string(tx.Payloads[t].SCID[:]))
-			trees[tx.Payloads[t].SCID] = tree
-		}
-
-		// now lets calculate CLn and CRn
-		for i := 0; i < int(tx.Payloads[t].Statement.RingSize); i++ {
-			key_pointer := tx.Payloads[t].Statement.Publickeylist_pointers[i*int(tx.Payloads[t].Statement.Bytes_per_publickey) : (i+1)*int(tx.Payloads[t].Statement.Bytes_per_publickey)]
-			_, key_compressed, _, err := tree.GetKeyValueFromHash(key_pointer)
-
-			// if destination address could be found be found in sc balance tree, assume its zero balance
-			if err != nil && !tx.Payloads[t].SCID.IsZero() {
-				if xerrors.Is(err, graviton.ErrNotFound) { // if the address is not found, lookup in main tree
-					_, key_compressed, _, err = balance_tree.GetKeyValueFromHash(key_pointer)
-					if err != nil {
-						return "", fmt.Errorf("Publickey not obtained. Are you connected to the daemon db? err %s\n", err)
-					}
-				}
-			}
-			if err != nil {
-				return "", fmt.Errorf("Publickey not obtained. Are you connected to the daemon db? err %s\n", err)
-			}
-
-			// decode public key and expand
-			{
-				var p bn256.G1
-				var pcopy [33]byte
-				copy(pcopy[:], key_compressed)
-				if err = p.DecodeCompressed(key_compressed[:]); err != nil {
-					return "", fmt.Errorf("key %d could not be decompressed", i)
-				}
-				tx.Payloads[t].Statement.Publickeylist_compressed = append(tx.Payloads[t].Statement.Publickeylist_compressed, pcopy)
-				tx.Payloads[t].Statement.Publickeylist = append(tx.Payloads[t].Statement.Publickeylist, &p)
-			}
-		}
-	}
-
-	var signer [33]byte
-
-	for t := range tx.Payloads {
-		if uint64(len(tx.Payloads[t].Statement.Publickeylist_compressed)) != tx.Payloads[t].Statement.RingSize {
-			panic("tx is not expanded")
-		}
-		if tx.Payloads[t].SCID.IsZero() && tx.Payloads[t].Statement.RingSize == 2 {
-			parity := tx.Payloads[t].Proof.Parity()
-			for i := 0; i < int(tx.Payloads[t].Statement.RingSize); i++ {
-				if (i%2 == 0) == parity { // this condition is well thought out and works good enough
-					copy(signer[:], tx.Payloads[t].Statement.Publickeylist_compressed[i][:])
-				}
-			}
-
-		}
-	}
-
-	address := &rpc.Address{
-		Mainnet:   false,
-		PublicKey: new(crypto.Point),
-	}
-
-	err = address.PublicKey.DecodeCompressed(signer[0:33])
-
-	if err != nil {
-		return "", fmt.Errorf("Signer decodecompressed issues. err %s\n", err)
-	}
-
-	//log.Printf("Signer is: %v\n", address.String())
-
-	return address.String(), err
-
-	// ----- End publickeylist expansion ----- //
 }
 
 // DERO.GetBlockHeaderByTopoHeight rpc call for returning block hash at a particular topoheight
@@ -603,4 +466,33 @@ func (indexer *Indexer) getWalletHeight() {
 
 		time.Sleep(5 * time.Second)
 	}
+}
+
+// Gets SC variable details
+func (client *Client) getSCVariables(scid string, topoheight int64) []*structures.SCIDVariable {
+	var err error
+	var variables []*structures.SCIDVariable
+
+	var getSCResults rpc.GetSC_Result
+	getSCParams := rpc.GetSC_Params{SCID: scid, Code: false, Variables: true, TopoHeight: topoheight}
+	if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+		log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
+		return variables
+	}
+
+	for k, v := range getSCResults.VariableStringKeys {
+		currVar := &structures.SCIDVariable{}
+		currVar.Key = k
+		switch cval := v.(type) {
+		case string:
+			currVar.Value = cval
+		default:
+			str := fmt.Sprintf("%v", cval)
+			currVar.Value = str
+		}
+		//currVar.Value = v.(string)
+		variables = append(variables, currVar)
+	}
+
+	return variables
 }
