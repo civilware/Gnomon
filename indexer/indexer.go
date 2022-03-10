@@ -323,6 +323,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
 					scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
 					Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
+					Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
 				}
 			} else {
 				if scidExist(validated_scs, bl_sctxs[i].Scid) {
@@ -345,6 +346,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						// Gets the SC variables (key/value) at a given topoheight and then stores them
 						scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
+						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "scinvoke", topoheight)
 					} else {
 						log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}

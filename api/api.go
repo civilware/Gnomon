@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +60,7 @@ func (apiServer *ApiServer) listen() {
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
+	router.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
@@ -72,6 +74,7 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
+	routerSSL.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
@@ -199,6 +202,78 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	} else if address == "" && scid != "" {
 		// If no address and scid only, return invokes of scid
 		reply["scidinvokes"] = apiServer.Backend.GetAllSCIDInvokeDetails(scid)
+	}
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	stats := apiServer.getStats()
+	if stats != nil {
+		reply["numscs"] = stats["numscs"]
+	} else {
+		// Default reply - for testing etc.
+		reply["hello"] = "world"
+	}
+
+	// Query for SCID
+	scidkeys, ok := r.URL.Query()["scid"]
+	var scid string
+	var height string
+
+	if !ok || len(scidkeys[0]) < 1 {
+		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			log.Printf("[API] Error serializing API response: %v\n", err)
+		}
+	} else {
+		scid = scidkeys[0]
+	}
+
+	// Query for address
+	heightkey, ok := r.URL.Query()["height"]
+
+	if !ok || len(heightkey[0]) < 1 {
+		log.Printf("URL Param 'height' is missing.\n")
+	} else {
+		height = heightkey[0]
+	}
+
+	if height != "" {
+		var variables []*structures.SCIDVariable
+		var err error
+
+		var topoheight int64
+		topoheight, err = strconv.ParseInt(height, 10, 64)
+		if err != nil {
+			log.Printf("Err converting '%v' to int64 - %v", height, err)
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				log.Printf("[API] Error serializing API response: %v\n", err)
+			}
+		}
+
+		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, topoheight)
+
+		reply["variables"] = variables
+	} else {
+		variables := make(map[int64][]*structures.SCIDVariable)
+
+		//variables = apiServer.Backend.GetAllSCIDVariableDetails(scid)
+
+		reply["variables"] = variables
 	}
 
 	err := json.NewEncoder(writer).Encode(reply)

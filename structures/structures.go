@@ -35,4 +35,8 @@ type SCIDVariable struct {
 	Value string
 }
 
+type SCIDInteractionHeight struct {
+	Heights map[int64]string
+}
+
 type GetInfo rpc.GetInfo_Result

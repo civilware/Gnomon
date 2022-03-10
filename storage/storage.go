@@ -386,4 +386,70 @@ func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) map[int64][]*stru
 	return results
 }
 
+// Stores SC interaction height and detail - height invoked upon and type (scinstall/scinvoke). This is separate tree & k/v since we can query it for other things at less data retrieval
+func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, interactiontype string, height int64) error {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreSCIDInteractionHeight] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	treename := scid + "heights"
+	tree, _ := ss.GetTree(treename)
+	key := scid
+	currSCIDInteractionHeight, err := tree.Get([]byte(key))
+	var interactionHeight *structures.SCIDInteractionHeight
+
+	var newInteractionHeight []byte
+
+	if err != nil {
+		heightArr := make(map[int64]string)
+		heightArr[height] = interactiontype
+		interactionHeight = &structures.SCIDInteractionHeight{Heights: heightArr}
+	} else {
+		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
+		_ = json.Unmarshal(currSCIDInteractionHeight, &interactionHeight)
+
+		interactionHeight.Heights[height] = interactiontype
+	}
+	newInteractionHeight, err = json.Marshal(interactionHeight)
+	if err != nil {
+		return fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
+	}
+
+	tree.Put([]byte(key), newInteractionHeight)
+
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v", cerr)
+	}
+	return nil
+}
+
+// Gets SC interaction height and detail by a given SCID
+func (g *GravitonStore) GetSCIDInteractionHeight(scid string) *structures.SCIDInteractionHeight {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	treename := scid + "heights"
+	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
+	key := scid
+
+	var scidinteractions *structures.SCIDInteractionHeight
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &scidinteractions)
+		return scidinteractions
+	}
+
+	return nil
+}
+
 // ---- End Application Graviton/Backend functions ---- //
