@@ -236,6 +236,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	for i := 0; i < len(bl.Tx_hashes); i++ {
 		var tx transaction.Transaction
 		var sc_args rpc.Arguments
+		var sc_fees uint64
 		var sender string
 
 		var inputparam rpc.GetTransaction_Params
@@ -253,6 +254,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 		if tx.TransactionType == transaction.SC_TX {
 			sc_args = tx.SCDATA
+			sc_fees = tx.Fees()
 			var method string
 			var scid string
 			var scid_hex []byte
@@ -284,14 +286,14 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 				}
 			}
 			//time.Sleep(2 * time.Second)
-			bl_sctxs = append(bl_sctxs, structures.Parse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender})
+			bl_sctxs = append(bl_sctxs, structures.Parse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
 		} else {
 			//log.Printf("TX %v is NOT a SC transaction.\n", bl.Tx_hashes[i])
 		}
 	}
 
 	if len(bl_sctxs) > 0 {
-		log.Printf("Block %v has %v SC tx(s).\n", bl.GetHash(), len(bl_sctxs))
+		//log.Printf("Block %v has %v SC tx(s).\n", bl.GetHash(), len(bl_sctxs))
 
 		for i := 0; i < len(bl_sctxs); i++ {
 			if bl_sctxs[i].Method == "installsc" {
@@ -311,30 +313,36 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					// Then reject the validation that this is an artificer installsc action and move on
 					log.Printf("SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
-					// Append into db for artificer validated SC
-					log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
-					validated_scs = append(validated_scs, bl_sctxs[i].Scid)
-
-					err = Graviton_backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
-					if err != nil {
-						log.Printf("Error storing owner: %v\n", err)
-					}
-
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
 					scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
-					Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
-					Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
+
+					if scVars != nil {
+						// Append into db for artificer validated SC
+						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
+						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
+
+						err = Graviton_backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
+						if err != nil {
+							log.Printf("Error storing owner: %v\n", err)
+						}
+
+						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
+						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
+					} else {
+						log.Printf("SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
+						Graviton_backend.StoreInvalidSCIDDeploys(bl_sctxs[i].Scid, bl_sctxs[i].Fees)
+					}
 				}
 			} else {
 				if scidExist(validated_scs, bl_sctxs[i].Scid) {
-					log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.\n", bl_sctxs[i].Scid)
+					//log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.\n", bl_sctxs[i].Scid)
 					// TODO: Modify this to be either all entrypoints, just Start, or a subset that is defined in pre-run params
 					//if bl_sctxs[i].entrypoint == "Start" {
 					//if bl_sctxs[i].Entrypoint == "InputStr" {
 					if true {
 						currsctx := bl_sctxs[i]
 
-						log.Printf("Tx %v matches scinvoke call filter(s). Adding %v to DB.\n", bl_sctxs[i].Txid, currsctx)
+						//log.Printf("Tx %v matches scinvoke call filter(s). Adding %v to DB.\n", bl_sctxs[i].Txid, currsctx)
 
 						err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
 						if err != nil {
@@ -348,10 +356,10 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "scinvoke", topoheight)
 					} else {
-						log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
+						//log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
 				} else {
-					log.Printf("SCID %v is not validated and thus we do not log SC interactions for this. Moving on.\n", bl_sctxs[i].Scid)
+					//log.Printf("SCID %v is not validated and thus we do not log SC interactions for this. Moving on.\n", bl_sctxs[i].Scid)
 				}
 			}
 		}

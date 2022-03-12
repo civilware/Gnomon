@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ type ApiServer struct {
 	Backend   *store.GravitonStore
 }
 
+// Configures a new API server to be used
 func NewApiServer(cfg *structures.APIConfig, backend *store.GravitonStore) *ApiServer {
 	return &ApiServer{
 		Config:  cfg,
@@ -27,6 +29,7 @@ func NewApiServer(cfg *structures.APIConfig, backend *store.GravitonStore) *ApiS
 	}
 }
 
+// Starts the api server
 func (apiServer *ApiServer) Start() {
 
 	apiServer.StatsIntv, _ = time.ParseDuration(apiServer.Config.StatsCollectInterval)
@@ -55,12 +58,14 @@ func (apiServer *ApiServer) Start() {
 	}
 }
 
+// Sets up the non-SSL API listener
 func (apiServer *ApiServer) listen() {
 	log.Printf("[API] Starting API on %v\n", apiServer.Config.Listen)
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	router.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
+	router.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
@@ -69,12 +74,14 @@ func (apiServer *ApiServer) listen() {
 	}
 }
 
+// Sets up the SSL API listener
 func (apiServer *ApiServer) listenSSL() {
 	log.Printf("[API] Starting SSL API on %v\n", apiServer.Config.SSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	routerSSL.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
+	routerSSL.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
@@ -83,6 +90,7 @@ func (apiServer *ApiServer) listenSSL() {
 	}
 }
 
+// Sets up a separate getinfo SSL listener. Use cases is for things like benchmark.dero.network and others that may want to consume a https endpoint of derod getinfo or other future command output
 func (apiServer *ApiServer) getInfoListenSSL() {
 	log.Printf("[API] Starting GetInfo SSL API on %v\n", apiServer.Config.GetInfoSSLListen)
 	routerSSL := mux.NewRouter()
@@ -94,6 +102,7 @@ func (apiServer *ApiServer) getInfoListenSSL() {
 	}
 }
 
+// Default 404 not found response if api entry wasn't caught
 func notFound(writer http.ResponseWriter, _ *http.Request) {
 	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -101,6 +110,7 @@ func notFound(writer http.ResponseWriter, _ *http.Request) {
 	writer.WriteHeader(http.StatusNotFound)
 }
 
+// Continuous check on number of validated scs etc. for base stats of service.
 func (apiServer *ApiServer) collectStats() {
 	stats := make(map[string]interface{})
 
@@ -222,7 +232,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
 	} else {
-		// Default reply - for testing etc.
+		// Default reply - for testing, initials etc.
 		reply["hello"] = "world"
 	}
 
@@ -233,10 +243,12 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 	if !ok || len(scidkeys[0]) < 1 {
 		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
 			log.Printf("[API] Error serializing API response: %v\n", err)
 		}
+		return
 	} else {
 		scid = scidkeys[0]
 	}
@@ -265,16 +277,79 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 			}
 		}
 
-		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, topoheight)
+		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+
+		interactionHeight := apiServer.getInteractionIndex(topoheight, scidInteractionHeights)
+
+		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
 
 		reply["variables"] = variables
+		reply["scidinteractionheight"] = interactionHeight
 	} else {
+		// TODO: Do we need this case? Should we always require a height to be defined so as not to slow the api return due to large dataset? Do we keep but put a limit on return amount?
+
 		variables := make(map[int64][]*structures.SCIDVariable)
 
-		//variables = apiServer.Backend.GetAllSCIDVariableDetails(scid)
+		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
+		if scid == "0000000000000000000000000000000000000000000000000000000000000001" {
+			log.Printf("Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
+			reply["variables"] = variables
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				log.Printf("[API] Error serializing API response: %v\n", err)
+			}
+			return
+		}
+
+		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+
+		for _, h := range scidInteractionHeights {
+			currVars := apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, h)
+			variables[h] = currVars
+		}
 
 		reply["variables"] = variables
+		reply["scidinteractionheights"] = scidInteractionHeights
 	}
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) getInteractionIndex(topoheight int64, heights []int64) (height int64) {
+	// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+	sort.SliceStable(heights, func(i, j int) bool {
+		return heights[i] > heights[j]
+	})
+
+	if topoheight > heights[0] {
+		return heights[0]
+	}
+
+	for i := 1; i < len(heights); i++ {
+		if heights[i] < topoheight {
+			return heights[i]
+		} else if heights[i] == topoheight {
+			return heights[i]
+		}
+	}
+
+	return height
+}
+
+func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	invalidscids := apiServer.Backend.GetInvalidSCIDDeploys()
+	reply["invalidscids"] = invalidscids
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {

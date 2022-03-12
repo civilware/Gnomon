@@ -12,6 +12,7 @@ type Parse struct {
 	Method     string
 	Sc_args    rpc.Arguments
 	Sender     string
+	Fees       uint64
 }
 
 type APIConfig struct {

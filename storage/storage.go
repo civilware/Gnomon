@@ -403,19 +403,17 @@ func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, interactiontype 
 	tree, _ := ss.GetTree(treename)
 	key := scid
 	currSCIDInteractionHeight, err := tree.Get([]byte(key))
-	var interactionHeight *structures.SCIDInteractionHeight
+	var interactionHeight []int64
 
 	var newInteractionHeight []byte
 
 	if err != nil {
-		heightArr := make(map[int64]string)
-		heightArr[height] = interactiontype
-		interactionHeight = &structures.SCIDInteractionHeight{Heights: heightArr}
+		interactionHeight = append(interactionHeight, height)
 	} else {
 		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
 		_ = json.Unmarshal(currSCIDInteractionHeight, &interactionHeight)
 
-		interactionHeight.Heights[height] = interactiontype
+		interactionHeight = append(interactionHeight, height)
 	}
 	newInteractionHeight, err = json.Marshal(interactionHeight)
 	if err != nil {
@@ -432,7 +430,7 @@ func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, interactiontype 
 }
 
 // Gets SC interaction height and detail by a given SCID
-func (g *GravitonStore) GetSCIDInteractionHeight(scid string) *structures.SCIDInteractionHeight {
+func (g *GravitonStore) GetSCIDInteractionHeight(scid string) []int64 {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -440,13 +438,77 @@ func (g *GravitonStore) GetSCIDInteractionHeight(scid string) *structures.SCIDIn
 	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
 	key := scid
 
-	var scidinteractions *structures.SCIDInteractionHeight
+	var scidinteractions []int64
 
 	v, _ := tree.Get([]byte(key))
 
 	if v != nil {
 		_ = json.Unmarshal(v, &scidinteractions)
 		return scidinteractions
+	}
+
+	return nil
+}
+
+// Stores any SCIDs that were attempted to be deployed but not correct - log scid/fees burnt attempting it.
+func (g *GravitonStore) StoreInvalidSCIDDeploys(scid string, fee uint64) error {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreInvalidSCIDDeploys] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	treename := "invalidscids"
+	tree, _ := ss.GetTree(treename)
+	key := "invalid"
+	currSCIDInteractionHeight, err := tree.Get([]byte(key))
+	currInvalidSCIDs := make(map[string]uint64)
+
+	var newInvalidSCIDs []byte
+
+	if err != nil {
+		currInvalidSCIDs[scid] = fee
+	} else {
+		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
+		_ = json.Unmarshal(currSCIDInteractionHeight, &currInvalidSCIDs)
+
+		currInvalidSCIDs[scid] = fee
+	}
+	newInvalidSCIDs, err = json.Marshal(currInvalidSCIDs)
+	if err != nil {
+		return fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
+	}
+
+	tree.Put([]byte(key), newInvalidSCIDs)
+
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v", cerr)
+	}
+	return nil
+}
+
+// Gets any SCIDs that were attempted to be deployed but not correct and their fees
+func (g *GravitonStore) GetInvalidSCIDDeploys() map[string]uint64 {
+	invalidSCIDs := make(map[string]uint64)
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	treename := "invalidscids"
+	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
+	key := "invalid"
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &invalidSCIDs)
+		return invalidSCIDs
 	}
 
 	return nil
