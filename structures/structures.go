@@ -4,7 +4,7 @@ import (
 	"github.com/deroproject/derohe/rpc"
 )
 
-type Parse struct {
+type SCTXParse struct {
 	Txid       string
 	Scid       string
 	Scid_hex   []byte
@@ -13,6 +13,20 @@ type Parse struct {
 	Sc_args    rpc.Arguments
 	Sender     string
 	Fees       uint64
+}
+
+type BurnTXParse struct {
+	Txid string
+	Scid string
+	Fees string
+}
+
+type NormalTXWithSCIDParse struct {
+	Txid   string
+	Scid   string
+	Fees   uint64
+	Height int64
+	//Ring []string
 }
 
 type APIConfig struct {

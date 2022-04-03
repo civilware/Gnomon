@@ -112,6 +112,65 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 	return 0
 }
 
+// Stores gnomon's txcount by a given txType - this is for stateful stores on close and reference on open
+func (g *GravitonStore) StoreTxCount(count int64, txType string) error {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	txCount := strconv.FormatInt(count, 10)
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreTxCount] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	key := txType + "txcount"
+
+	tree, _ := ss.GetTree("stats")
+	tree.Put([]byte(key), []byte(txCount)) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Gets gnomon's txcount by a given txType - this is for stateful stores on close and reference on open
+func (g *GravitonStore) GetTxCount(txType string) int64 {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[GetTxCount] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("stats") // use or create tree named by poolhost in config
+	key := txType + "txcount"
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		txCount, err := strconv.ParseInt(string(v), 10, 64)
+		if err != nil {
+			log.Printf("ERR - Error parsing stored int for txcount: %v\n", err)
+			return 0
+		}
+		return txCount
+	}
+
+	//log.Printf("[GetTxCount] No txcount stored for '%v'. Starting from 0\n", txType)
+
+	return 0
+}
+
 // Stores the owner (who deployed it) of a given scid
 func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 	store := g.DB
@@ -179,8 +238,70 @@ func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 	return results
 }
 
+// Stores all normal txs with SCIDs and their respective ring members for future balance/interaction reference
+func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID *structures.NormalTXWithSCIDParse) error {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreSCIDInteractionHeight] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	treename := "normaltxwithscid"
+	tree, _ := ss.GetTree(treename)
+	key := addr
+	currNormTxsWithSCID, err := tree.Get([]byte(key))
+	var normTxsWithSCID []*structures.NormalTXWithSCIDParse
+
+	var newNormTxsWithSCID []byte
+
+	if err != nil {
+		normTxsWithSCID = append(normTxsWithSCID, normTxWithSCID)
+	} else {
+		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
+		_ = json.Unmarshal(currNormTxsWithSCID, &normTxsWithSCID)
+
+		normTxsWithSCID = append(normTxsWithSCID, normTxWithSCID)
+	}
+	newNormTxsWithSCID, err = json.Marshal(normTxsWithSCID)
+	if err != nil {
+		return fmt.Errorf("[Graviton] could not marshal normTxsWithSCID info: %v", err)
+	}
+
+	tree.Put([]byte(key), newNormTxsWithSCID)
+
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v", cerr)
+	}
+	return nil
+}
+
+// Returns all normal txs with SCIDs based on a given address
+func (g *GravitonStore) GetAllNormalTxWithSCIDByAddr(addr string) (normTxsWithSCID []*structures.NormalTXWithSCIDParse) {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	treename := "normaltxwithscid"
+	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
+	key := addr
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &normTxsWithSCID)
+		return normTxsWithSCID
+	}
+
+	return nil
+}
+
 // Stores all scinvoke details of a given scid
-func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.Parse) error {
+func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.SCTXParse) error {
 	confBytes, err := json.Marshal(invokedetails)
 	if err != nil {
 		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v\n", err)
@@ -211,7 +332,7 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 }
 
 // Returns all scinvoke calls from a given scid
-func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*structures.Parse) {
+func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*structures.SCTXParse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
 	tree, _ := ss.GetTree(scid)
@@ -219,7 +340,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*s
 	c := tree.Cursor()
 	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
 	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-		var currdetails *structures.Parse
+		var currdetails *structures.SCTXParse
 		_ = json.Unmarshal(v, &currdetails)
 		invokedetails = append(invokedetails, currdetails)
 	}
@@ -228,7 +349,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetails(scid string) (invokedetails []*s
 }
 
 // Retruns all scinvoke calls from a given scid that match a given entrypoint
-func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypoint string) (invokedetails []*structures.Parse) {
+func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypoint string) (invokedetails []*structures.SCTXParse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
 	tree, _ := ss.GetTree(scid)
@@ -236,7 +357,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypo
 	c := tree.Cursor()
 	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
 	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-		var currdetails *structures.Parse
+		var currdetails *structures.SCTXParse
 		_ = json.Unmarshal(v, &currdetails)
 		if currdetails.Entrypoint == entrypoint {
 			invokedetails = append(invokedetails, currdetails)
@@ -247,7 +368,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsByEntrypoint(scid string, entrypo
 }
 
 // Returns all scinvoke calls from a given scid that match a given signer
-func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signer string) (invokedetails []*structures.Parse) {
+func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signer string) (invokedetails []*structures.SCTXParse) {
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0)
 	tree, _ := ss.GetTree(scid)
@@ -255,7 +376,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signer stri
 	c := tree.Cursor()
 	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
 	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
-		var currdetails *structures.Parse
+		var currdetails *structures.SCTXParse
 		_ = json.Unmarshal(v, &currdetails)
 		if currdetails.Sender == signer {
 			invokedetails = append(invokedetails, currdetails)

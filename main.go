@@ -233,7 +233,7 @@ func main() {
 
 			RLI.SetPrompt(fmt.Sprintf("\033[1m\033[32mGNOMON \033[0m"+color+"[%d/%d] "+gcolor+"R:%d G:%d >>\033[0m ", currheight, defaultIndexer.ChainHeight, gnomon_count, len(Gnomon.Indexers)))
 			RLI.Refresh()
-			time.Sleep(1 * time.Second)
+			time.Sleep(3 * time.Second)
 		}
 	}()
 

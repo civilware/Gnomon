@@ -13,6 +13,7 @@ import (
 	"github.com/civilware/Gnomon/structures"
 
 	"github.com/deroproject/derohe/block"
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
 
@@ -231,7 +232,11 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	block_bin, _ = hex.DecodeString(io.Blob)
 	bl.Deserialize(block_bin)
 
-	var bl_sctxs []structures.Parse
+	var bl_sctxs []structures.SCTXParse
+	var bl_normtxs []structures.NormalTXWithSCIDParse
+	var regTxCount int64
+	var normTxCount int64
+	var burnTxCount int64
 
 	for i := 0; i < len(bl.Tx_hashes); i++ {
 		var tx transaction.Transaction
@@ -245,13 +250,15 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 		inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
 
 		if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-			log.Printf("[indexBlock] ERROR - GetTransaction failed: %v\n", err)
-			return err
+			log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
+			//return err
+			continue
 		}
 
 		tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
 		tx.Deserialize(tx_bin)
 
+		// TODO: Add count for registration TXs and store the following on normal txs: IF SCID IS PRESENT, store tx details + ring members + fees + etc. Use later for scid balance queries
 		if tx.TransactionType == transaction.SC_TX {
 			sc_args = tx.SCDATA
 			sc_fees = tx.Fees()
@@ -275,6 +282,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 				scid = string(scid_hex)
 			}
 
+			// TODO: What if there are multiple payloads with potentially different ringsizes, can that happen?
 			if tx.Payloads[0].Statement.RingSize == 2 {
 				sender = output.Txs[0].Signer
 			} else {
@@ -286,9 +294,122 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 				}
 			}
 			//time.Sleep(2 * time.Second)
-			bl_sctxs = append(bl_sctxs, structures.Parse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
+			bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
+		} else if tx.TransactionType == transaction.REGISTRATION {
+			regTxCount++
+		} else if tx.TransactionType == transaction.BURN_TX {
+			// TODO: Handle burn_tx here
+			burnTxCount++
+		} else if tx.TransactionType == transaction.NORMAL {
+			// TODO: Handle normal tx here
+			normTxCount++
+
+			for j := 0; j < len(tx.Payloads); j++ {
+				var zhash crypto.Hash
+				if tx.Payloads[j].SCID != zhash {
+					log.Printf("TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
+					for _, v := range output.Txs[j].Ring[j] {
+						//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+						Graviton_backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+					}
+				}
+			}
 		} else {
-			//log.Printf("TX %v is NOT a SC transaction.\n", bl.Tx_hashes[i])
+			//log.Printf("TX %v type is NOT handled.\n", bl.Tx_hashes[i])
+		}
+	}
+
+	//blheight := int64(bl.Height)
+	//normTxCount = int64(len(bl.Tx_hashes))
+
+	if regTxCount > 0 {
+		// Load from mem existing regTxCount and append new value
+		currRegTxCount := Graviton_backend.GetTxCount("registration")
+		err := Graviton_backend.StoreTxCount(regTxCount+currRegTxCount, "registration")
+		if err != nil {
+			log.Printf("ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currRegTxCount, regTxCount, regTxCount+currRegTxCount)
+		}
+	}
+
+	if burnTxCount > 0 {
+		// Load from mem existing burnTxCount and append new value
+		currBurnTxCount := Graviton_backend.GetTxCount("burn")
+		err := Graviton_backend.StoreTxCount(burnTxCount+currBurnTxCount, "burn")
+		if err != nil {
+			log.Printf("ERROR - Error storing burn tx count. DB '%v' - this block count '%v' - total '%v'", currBurnTxCount, burnTxCount, regTxCount+currBurnTxCount)
+		}
+	}
+
+	if normTxCount > 0 {
+		/*
+			// Test code for finding highest tps block
+			var io rpc.GetBlockHeaderByHeight_Result
+			var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: bl.Height - 1}
+
+			if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
+				log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v\n", err)
+				return err
+			} else {
+				//log.Printf("[getBlockHash] Retrieved block header from topoheight %v\n", height)
+				//mainnet = !info.Testnet // inverse of testnet is mainnet
+				//log.Printf("%v\n", io)
+			}
+
+			blid := io.Block_Header.Hash
+
+			var io2 rpc.GetBlock_Result
+			var ip2 = rpc.GetBlock_Params{Hash: blid}
+
+			if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip2, &io2); err != nil {
+				log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
+				return err
+			}
+
+			var bl2 block.Block
+			var block_bin2 []byte
+
+			block_bin2, _ = hex.DecodeString(io2.Blob)
+			bl2.Deserialize(block_bin2)
+
+			prevtimestamp := bl2.Timestamp
+
+			// Load from mem existing normTxCount and append new value
+			currNormTxCount := Graviton_backend.GetTxCount("normal")
+
+			//log.Printf("%v / (%v - %v)", normTxCount, int64(bl.Timestamp), int64(prevtimestamp))
+			tps := normTxCount / ((int64(bl.Timestamp) - int64(prevtimestamp)) / 1000)
+
+			//err := Graviton_backend.StoreTxCount(normTxCount+currNormTxCount, "normal")
+			if tps > currNormTxCount {
+				err := Graviton_backend.StoreTxCount(tps, "normal")
+				if err != nil {
+					log.Printf("ERROR - Error storing normal tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, tps, regTxCount+currNormTxCount)
+				}
+
+				err = Graviton_backend.StoreTxCount(blheight, "registration")
+				if err != nil {
+					log.Printf("ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, normTxCount, regTxCount+currNormTxCount)
+				}
+
+				err = Graviton_backend.StoreTxCount((int64(bl.Timestamp) - int64(prevtimestamp)), "burn")
+				if err != nil {
+					log.Printf("ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, normTxCount, regTxCount+currNormTxCount)
+				}
+			}
+		*/
+
+		// Load from mem existing normTxCount and append new value
+		currNormTxCount := Graviton_backend.GetTxCount("normal")
+		err := Graviton_backend.StoreTxCount(normTxCount+currNormTxCount, "normal")
+		if err != nil {
+			log.Printf("ERROR - Error storing normal tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, currNormTxCount, normTxCount+currNormTxCount)
+		}
+
+		// Store all normal TXs that contained a SC transfer
+		if len(bl_normtxs) > 0 {
+			for i := 0; i < len(bl_normtxs); i++ {
+
+			}
 		}
 	}
 

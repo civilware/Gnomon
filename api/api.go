@@ -66,6 +66,7 @@ func (apiServer *ApiServer) listen() {
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	router.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	router.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
+	router.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
@@ -82,6 +83,7 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	routerSSL.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	routerSSL.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
+	routerSSL.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
@@ -116,8 +118,14 @@ func (apiServer *ApiServer) collectStats() {
 
 	// Get all scid:owner
 	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	regTxCount := apiServer.Backend.GetTxCount("registration")
+	burnTxCount := apiServer.Backend.GetTxCount("burn")
+	normTxCount := apiServer.Backend.GetTxCount("normal")
 	stats["numscs"] = len(sclist)
 	stats["indexedscs"] = sclist
+	stats["regTxCount"] = regTxCount
+	stats["burnTxCount"] = burnTxCount
+	stats["normTxCount"] = normTxCount
 
 	apiServer.Stats.Store(stats)
 }
@@ -134,6 +142,9 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
 		reply["indexedscs"] = stats["indexedscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
 	} else {
 		// Default reply - for testing etc.
 		reply["hello"] = "world"
@@ -186,7 +197,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 
 	if address != "" && scid != "" {
 		// Return results that match both address and scid
-		var addrscidinvokes []*structures.Parse
+		var addrscidinvokes []*structures.SCTXParse
 
 		for k, _ := range sclist {
 			if k == scid {
@@ -198,7 +209,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		reply["addrscidinvokes"] = addrscidinvokes
 	} else if address != "" && scid == "" {
 		// If address and no scid, return combined results of all instances address is defined (invokes and installs)
-		var addrinvokes [][]*structures.Parse
+		var addrinvokes [][]*structures.SCTXParse
 
 		for k, _ := range sclist {
 			currinvokedetails := apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(k, address)
@@ -312,6 +323,48 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		reply["variables"] = variables
 		reply["scidinteractionheights"] = scidInteractionHeights
 	}
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) NormalTxWithSCIDByAddr(writer http.ResponseWriter, r *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	stats := apiServer.getStats()
+	if stats != nil {
+		reply["numscs"] = stats["numscs"]
+	} else {
+		// Default reply - for testing, initials etc.
+		reply["hello"] = "world"
+	}
+
+	// Query for SCID
+	addrkeys, ok := r.URL.Query()["address"]
+	var addr string
+
+	if !ok || len(addrkeys[0]) < 1 {
+		log.Printf("URL Param 'addr' is missing. Debugging only.\n")
+		reply["variables"] = nil
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			log.Printf("[API] Error serializing API response: %v\n", err)
+		}
+		return
+	} else {
+		addr = addrkeys[0]
+	}
+
+	allNormTxWithSCIDByAddr := apiServer.Backend.GetAllNormalTxWithSCIDByAddr(addr)
+
+	reply["normtxwithscidbyaddr"] = allNormTxWithSCIDByAddr
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {

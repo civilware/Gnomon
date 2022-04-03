@@ -3,3 +3,5 @@ GNOMON_*
 */testnet
 testnet*
 *.exe
+/test/mainnet
+/gnomondb
