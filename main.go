@@ -371,10 +371,17 @@ func (g *GnomonServer) close() {
 	g.Closing = true
 	for _, v := range g.Indexers {
 		v.Closing = true
+		writeWait, _ := time.ParseDuration("10ms")
+		for v.Backend.Writing == 1 {
+			log.Printf("[Main-close] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		v.Backend.Writing = 1
 		err := v.Backend.StoreLastIndexHeight(v.LastIndexedHeight)
 		if err != nil {
 			log.Printf("[close] ERR - Error storing last index height of search_filter '%v' : %v\n", v.SearchFilter, err)
 		}
+		v.Backend.Writing = 0
 	}
 }
 

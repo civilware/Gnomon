@@ -167,6 +167,9 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	stats := apiServer.getStats()
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
 	} else {
 		// Default reply - for testing etc.
 		reply["hello"] = "world"
@@ -242,6 +245,9 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	stats := apiServer.getStats()
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
 	} else {
 		// Default reply - for testing, initials etc.
 		reply["hello"] = "world"
@@ -341,6 +347,9 @@ func (apiServer *ApiServer) NormalTxWithSCIDByAddr(writer http.ResponseWriter, r
 	stats := apiServer.getStats()
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
 	} else {
 		// Default reply - for testing, initials etc.
 		reply["hello"] = "world"

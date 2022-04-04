@@ -49,10 +49,17 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, l
 	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
 	if search_filter == "" {
 		validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
+		writeWait, _ := time.ParseDuration("10ms")
+		for Graviton_backend.Writing == 1 {
+			log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		Graviton_backend.Writing = 1
 		err = Graviton_backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
 		if err != nil {
 			log.Printf("Error storing owner: %v\n", err)
 		}
+		Graviton_backend.Writing = 0
 	}
 
 	storedindex := Graviton_backend.GetLastIndexHeight()
@@ -310,7 +317,14 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					log.Printf("TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
 					for _, v := range output.Txs[j].Ring[j] {
 						//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+						writeWait, _ := time.ParseDuration("10ms")
+						for Graviton_backend.Writing == 1 {
+							log.Printf("[Indexer-indexBlock] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						Graviton_backend.Writing = 1
 						Graviton_backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+						Graviton_backend.Writing = 0
 					}
 				}
 			}
@@ -325,7 +339,14 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	if regTxCount > 0 {
 		// Load from mem existing regTxCount and append new value
 		currRegTxCount := Graviton_backend.GetTxCount("registration")
+		writeWait, _ := time.ParseDuration("10ms")
+		for Graviton_backend.Writing == 1 {
+			log.Printf("[Indexer-indexBlock] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		Graviton_backend.Writing = 1
 		err := Graviton_backend.StoreTxCount(regTxCount+currRegTxCount, "registration")
+		Graviton_backend.Writing = 0
 		if err != nil {
 			log.Printf("ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currRegTxCount, regTxCount, regTxCount+currRegTxCount)
 		}
@@ -334,10 +355,17 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	if burnTxCount > 0 {
 		// Load from mem existing burnTxCount and append new value
 		currBurnTxCount := Graviton_backend.GetTxCount("burn")
+		writeWait, _ := time.ParseDuration("10ms")
+		for Graviton_backend.Writing == 1 {
+			log.Printf("[Indexer-indexBlock] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		Graviton_backend.Writing = 1
 		err := Graviton_backend.StoreTxCount(burnTxCount+currBurnTxCount, "burn")
 		if err != nil {
 			log.Printf("ERROR - Error storing burn tx count. DB '%v' - this block count '%v' - total '%v'", currBurnTxCount, burnTxCount, regTxCount+currBurnTxCount)
 		}
+		Graviton_backend.Writing = 0
 	}
 
 	if normTxCount > 0 {
@@ -400,10 +428,17 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 		// Load from mem existing normTxCount and append new value
 		currNormTxCount := Graviton_backend.GetTxCount("normal")
+		writeWait, _ := time.ParseDuration("10ms")
+		for Graviton_backend.Writing == 1 {
+			log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		Graviton_backend.Writing = 1
 		err := Graviton_backend.StoreTxCount(normTxCount+currNormTxCount, "normal")
 		if err != nil {
 			log.Printf("ERROR - Error storing normal tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, currNormTxCount, normTxCount+currNormTxCount)
 		}
+		Graviton_backend.Writing = 0
 
 		// Store all normal TXs that contained a SC transfer
 		if len(bl_normtxs) > 0 {
@@ -442,6 +477,12 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
 
+						writeWait, _ := time.ParseDuration("10ms")
+						for Graviton_backend.Writing == 1 {
+							log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						Graviton_backend.Writing = 1
 						err = Graviton_backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						if err != nil {
 							log.Printf("Error storing owner: %v\n", err)
@@ -449,9 +490,17 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
+						Graviton_backend.Writing = 0
 					} else {
 						log.Printf("SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
+						writeWait, _ := time.ParseDuration("10ms")
+						for Graviton_backend.Writing == 1 {
+							log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						Graviton_backend.Writing = 1
 						Graviton_backend.StoreInvalidSCIDDeploys(bl_sctxs[i].Scid, bl_sctxs[i].Fees)
+						Graviton_backend.Writing = 0
 					}
 				}
 			} else {
@@ -465,6 +514,12 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 						//log.Printf("Tx %v matches scinvoke call filter(s). Adding %v to DB.\n", bl_sctxs[i].Txid, currsctx)
 
+						writeWait, _ := time.ParseDuration("10ms")
+						for Graviton_backend.Writing == 1 {
+							log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						Graviton_backend.Writing = 1
 						err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
 						if err != nil {
 							log.Printf("Err storing invoke details. Err: %v\n", err)
@@ -476,6 +531,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "scinvoke", topoheight)
+						Graviton_backend.Writing = 0
 					} else {
 						//log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
@@ -551,18 +607,32 @@ func (indexer *Indexer) getInfo() {
 			if currStoreGetInfo.Height < info.Height {
 				var structureGetInfo *structures.GetInfo
 				structureGetInfo = info
+				writeWait, _ := time.ParseDuration("10ms")
+				for indexer.Backend.Writing == 1 {
+					log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+					time.Sleep(writeWait)
+				}
+				indexer.Backend.Writing = 1
 				err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
 				if err != nil {
 					log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
 				}
+				indexer.Backend.Writing = 0
 			}
 		} else {
 			var structureGetInfo *structures.GetInfo
 			structureGetInfo = info
+			writeWait, _ := time.ParseDuration("10ms")
+			for indexer.Backend.Writing == 1 {
+				log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+			indexer.Backend.Writing = 1
 			err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
 			if err != nil {
 				log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
 			}
+			indexer.Backend.Writing = 0
 		}
 
 		indexer.ChainHeight = info.TopoHeight
