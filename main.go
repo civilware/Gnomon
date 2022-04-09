@@ -17,6 +17,7 @@ import (
 	"github.com/chzyer/readline"
 	"github.com/civilware/Gnomon/api"
 	"github.com/civilware/Gnomon/indexer"
+	"github.com/civilware/Gnomon/mbllookup"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 	"github.com/docopt/docopt-go"
@@ -29,6 +30,7 @@ type GnomonServer struct {
 	Closing           bool
 	DaemonEndpoint    string
 	RunMode           string
+	MBLLookup         bool
 }
 
 var command_line string = `Gnomon
@@ -47,7 +49,8 @@ Options:
   --get-info-ssl-address=<127.0.0.1:9394>	Host GetInfo ssl api. This is to completely isolate it from gnomon api results as a whole. Normal api endpoints also surface the getinfo call if needed.
   --start-topoheight=<31170>	Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
-  --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).`
+  --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
+  --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory`
 
 var Exit_In_Progress = make(chan bool)
 
@@ -57,6 +60,7 @@ var api_ssl_endpoint string
 var get_info_ssl_endpoint string
 var sslenabled bool
 var search_filter string
+var mbl bool
 var version = "0.1a"
 
 var RLI *readline.Instance
@@ -116,7 +120,7 @@ func main() {
 		if arguments["--runmode"] == "daemon" || arguments["--runmode"] == "wallet" {
 			Gnomon.RunMode = arguments["--runmode"].(string)
 		} else {
-			log.Printf("ERR - Runmode must be either 'daemon' or 'wallet'")
+			log.Fatalf("ERR - Runmode must be either 'daemon' or 'wallet'")
 			return
 		}
 	}
@@ -126,6 +130,7 @@ func main() {
 		last_indexedheight, err = strconv.ParseInt(arguments["--start-topoheight"].(string), 10, 64)
 		if err != nil {
 			log.Fatalf("[Main] ERROR while converting --start-topoheight to int64\n")
+			return
 		}
 	}
 
@@ -135,6 +140,20 @@ func main() {
 	} else {
 		log.Printf("[Main] No search filter defined.. grabbing all.\n")
 	}
+
+	if arguments["--enable-miniblock-lookup"] != nil {
+		mbllookupstr := arguments["--enable-miniblock-lookup"].(string)
+		if mbllookupstr == "true" {
+			mbl = true
+		}
+
+		err = mbllookup.DeroDB.LoadDeroDB()
+		if err != nil {
+			log.Fatalf("[Main] ERR Loading DeroDB - Be sure to run from directory of fully synced mainnet - %v\n", err)
+			return
+		}
+	}
+	Gnomon.MBLLookup = mbl
 
 	// Database
 	var shasum string
@@ -158,13 +177,14 @@ func main() {
 		GetInfoCertFile:      "getinfofullchain.cer",
 		KeyFile:              "cert.key",
 		GetInfoKeyFile:       "getinfocert.key",
+		MBLLookup:            mbl,
 	}
 	// TODO: Add default search filter index of sorts, rather than passing through Graviton_backend object as a whole
 	apis := api.NewApiServer(apic, Graviton_backend)
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -313,7 +333,7 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(Gnomon.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint, Gnomon.RunMode)
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint, Gnomon.RunMode, Gnomon.MBLLookup)
 				go nIndexer.StartDaemonMode()
 				Gnomon.Indexers[nsf] = nIndexer
 			}

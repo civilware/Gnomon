@@ -635,4 +635,60 @@ func (g *GravitonStore) GetInvalidSCIDDeploys() map[string]uint64 {
 	return nil
 }
 
+// Stores the miniblocks within a given blid
+func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*structures.MBLInfo) error {
+	confBytes, err := json.Marshal(mbldetails)
+	if err != nil {
+		return fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v\n", err)
+	}
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("miniblocks")
+	tree.Put([]byte(blid), confBytes) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Returns the miniblocks within a given blid if previously stored
+func (g *GravitonStore) GetMiniblockDetailsByHash(blid string) []*structures.MBLInfo {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[GetMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("miniblocks") // use or create tree named by poolhost in config
+	key := blid
+
+	var miniblocks []*structures.MBLInfo
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &miniblocks)
+		return miniblocks
+	}
+
+	return nil
+}
+
 // ---- End Application Graviton/Backend functions ---- //

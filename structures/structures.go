@@ -26,7 +26,11 @@ type NormalTXWithSCIDParse struct {
 	Scid   string
 	Fees   uint64
 	Height int64
-	//Ring []string
+}
+
+type MBLInfo struct {
+	Hash  string
+	Miner string
 }
 
 type APIConfig struct {
@@ -43,6 +47,7 @@ type APIConfig struct {
 	GetInfoCertFile      string `json:"getInfoCertFile"`
 	KeyFile              string `json:"keyFile"`
 	GetInfoKeyFile       string `json:"getInfoKeyFile"`
+	MBLLookup            bool   `json:"mbblookup"`
 }
 
 type SCIDVariable struct {

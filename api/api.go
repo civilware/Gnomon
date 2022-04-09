@@ -67,6 +67,9 @@ func (apiServer *ApiServer) listen() {
 	router.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	router.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	router.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
+	if apiServer.Config.MBLLookup {
+		router.HandleFunc("/api/getmbladdrs", apiServer.MBLLookupIndex)
+	}
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
@@ -84,6 +87,9 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	routerSSL.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	routerSSL.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
+	if apiServer.Config.MBLLookup {
+		routerSSL.HandleFunc("/api/getmbladdrs", apiServer.MBLLookupIndex)
+	}
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
@@ -202,7 +208,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		// Return results that match both address and scid
 		var addrscidinvokes []*structures.SCTXParse
 
-		for k, _ := range sclist {
+		for k := range sclist {
 			if k == scid {
 				addrscidinvokes = apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(scid, address)
 				break
@@ -214,7 +220,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		// If address and no scid, return combined results of all instances address is defined (invokes and installs)
 		var addrinvokes [][]*structures.SCTXParse
 
-		for k, _ := range sclist {
+		for k := range sclist {
 			currinvokedetails := apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(k, address)
 
 			if currinvokedetails != nil {
@@ -412,6 +418,51 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 
 	invalidscids := apiServer.Backend.GetInvalidSCIDDeploys()
 	reply["invalidscids"] = invalidscids
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) MBLLookupIndex(writer http.ResponseWriter, r *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	stats := apiServer.getStats()
+	if stats != nil {
+		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
+	} else {
+		// Default reply - for testing, initials etc.
+		reply["hello"] = "world"
+	}
+
+	// Query for SCID
+	blidkeys, ok := r.URL.Query()["blid"]
+	var blid string
+
+	if !ok || len(blidkeys[0]) < 1 {
+		log.Printf("URL Param 'blid' is missing. Debugging only.\n")
+		reply["mbl"] = nil
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			log.Printf("[API] Error serializing API response: %v\n", err)
+		}
+		return
+	} else {
+		blid = blidkeys[0]
+	}
+
+	allMiniBlocksByBlid := apiServer.Backend.GetMiniblockDetailsByHash(blid)
+
+	reply["mbl"] = allMiniBlocksByBlid
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
