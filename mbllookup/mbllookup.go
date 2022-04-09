@@ -1,11 +1,9 @@
 package mbllookup
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/deroproject/derohe/block"
 	"github.com/deroproject/derohe/blockchain"
@@ -112,39 +110,6 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 func (s *Storetopofs) Open(basedir string) (err error) {
 	s.Topomapping, err = os.OpenFile(filepath.Join(basedir, "topo.map"), os.O_RDWR|os.O_CREATE, 0700)
 	return err
-}
-
-// Different storefs pointers, thus used exported function within. Reference: https://github.com/deroproject/derohe/blob/main/blockchain/storefs.go#L124
-func (s *Storefs) ReadBlockSnapshotVersion(h [32]byte) (uint64, error) {
-	dir := filepath.Join(filepath.Join(s.Basedir, "bltx_store"), fmt.Sprintf("%02x", h[0]), fmt.Sprintf("%02x", h[1]), fmt.Sprintf("%02x", h[2]))
-
-	files, err := os.ReadDir(dir) // this always returns the sorted list
-	if err != nil {
-		return 0, err
-	}
-	// windows has a caching issue, so earlier versions may exist at the same time
-	// so we mitigate it, by using the last version, below 3 lines reverse the already sorted arrray
-	for left, right := 0, len(files)-1; left < right; left, right = left+1, right-1 {
-		files[left], files[right] = files[right], files[left]
-	}
-
-	filename_start := fmt.Sprintf("%x.block", h[:])
-	for _, file := range files {
-		if strings.HasPrefix(file.Name(), filename_start) {
-			var ssversion uint64
-			parts := strings.Split(file.Name(), "_")
-			if len(parts) != 4 {
-				panic("such filename cannot occur")
-			}
-			_, err := fmt.Sscan(parts[2], &ssversion)
-			if err != nil {
-				return 0, err
-			}
-			return ssversion, nil
-		}
-	}
-
-	return 0, os.ErrNotExist
 }
 
 // ---- End DERO DB functions ---- //
