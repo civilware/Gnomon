@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/civilware/Gnomon/mbllookup"
@@ -269,93 +270,102 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	var normTxCount int64
 	var burnTxCount int64
 
+	var wg sync.WaitGroup
+	wg.Add(len(bl.Tx_hashes))
+
 	for i := 0; i < len(bl.Tx_hashes); i++ {
-		var tx transaction.Transaction
-		var sc_args rpc.Arguments
-		var sc_fees uint64
-		var sender string
+		go func(i int) {
+			var tx transaction.Transaction
+			var sc_args rpc.Arguments
+			var sc_fees uint64
+			var sender string
 
-		var inputparam rpc.GetTransaction_Params
-		var output rpc.GetTransaction_Result
+			var inputparam rpc.GetTransaction_Params
+			var output rpc.GetTransaction_Result
 
-		inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
+			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
 
-		if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-			log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
-			//return err
-			continue
-		}
-
-		tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
-		tx.Deserialize(tx_bin)
-
-		// TODO: Add count for registration TXs and store the following on normal txs: IF SCID IS PRESENT, store tx details + ring members + fees + etc. Use later for scid balance queries
-		if tx.TransactionType == transaction.SC_TX {
-			sc_args = tx.SCDATA
-			sc_fees = tx.Fees()
-			var method string
-			var scid string
-			var scid_hex []byte
-
-			entrypoint := fmt.Sprintf("%v", sc_args.Value("entrypoint", "S"))
-
-			sc_action := fmt.Sprintf("%v", sc_args.Value("SC_ACTION", "U"))
-
-			// Other ways to parse this, but will do for now --> see https://github.com/deroproject/derohe/blob/main/blockchain/blockchain.go#L688
-			if sc_action == "1" {
-				method = "installsc"
-				scid = string(bl.Tx_hashes[i].String())
-				scid_hex = []byte(scid)
-			} else {
-				method = "scinvoke"
-				// Get "SC_ID" which is of type H to byte.. then to string
-				scid_hex = []byte(fmt.Sprintf("%v", sc_args.Value("SC_ID", "H")))
-				scid = string(scid_hex)
-			}
-
-			// TODO: What if there are multiple payloads with potentially different ringsizes, can that happen?
-			if tx.Payloads[0].Statement.RingSize == 2 {
-				sender = output.Txs[0].Signer
-			} else {
-				log.Printf("ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
+			if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
+				log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
+				//return err
 				//continue
-				if method == "installsc" {
-					// We do not store a ringsize > 2 of installsc calls. Only of SC interactions via sc_invoke for ringsize > 2 and just blank out the sender
-					continue
-				}
+				wg.Done()
 			}
-			//time.Sleep(2 * time.Second)
-			bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
-		} else if tx.TransactionType == transaction.REGISTRATION {
-			regTxCount++
-		} else if tx.TransactionType == transaction.BURN_TX {
-			// TODO: Handle burn_tx here
-			burnTxCount++
-		} else if tx.TransactionType == transaction.NORMAL {
-			// TODO: Handle normal tx here
-			normTxCount++
 
-			for j := 0; j < len(tx.Payloads); j++ {
-				var zhash crypto.Hash
-				if tx.Payloads[j].SCID != zhash {
-					log.Printf("TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
-					for _, v := range output.Txs[j].Ring[j] {
-						//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
-						writeWait, _ := time.ParseDuration("10ms")
-						for Graviton_backend.Writing == 1 {
-							log.Printf("[Indexer-indexBlock-normTx-txLoop] GravitonDB is writing... sleeping for %v...", writeWait)
-							time.Sleep(writeWait)
-						}
-						Graviton_backend.Writing = 1
-						Graviton_backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
-						Graviton_backend.Writing = 0
+			tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
+			tx.Deserialize(tx_bin)
+
+			// TODO: Add count for registration TXs and store the following on normal txs: IF SCID IS PRESENT, store tx details + ring members + fees + etc. Use later for scid balance queries
+			if tx.TransactionType == transaction.SC_TX {
+				sc_args = tx.SCDATA
+				sc_fees = tx.Fees()
+				var method string
+				var scid string
+				var scid_hex []byte
+
+				entrypoint := fmt.Sprintf("%v", sc_args.Value("entrypoint", "S"))
+
+				sc_action := fmt.Sprintf("%v", sc_args.Value("SC_ACTION", "U"))
+
+				// Other ways to parse this, but will do for now --> see https://github.com/deroproject/derohe/blob/main/blockchain/blockchain.go#L688
+				if sc_action == "1" {
+					method = "installsc"
+					scid = string(bl.Tx_hashes[i].String())
+					scid_hex = []byte(scid)
+				} else {
+					method = "scinvoke"
+					// Get "SC_ID" which is of type H to byte.. then to string
+					scid_hex = []byte(fmt.Sprintf("%v", sc_args.Value("SC_ID", "H")))
+					scid = string(scid_hex)
+				}
+
+				// TODO: What if there are multiple payloads with potentially different ringsizes, can that happen?
+				if tx.Payloads[0].Statement.RingSize == 2 {
+					sender = output.Txs[0].Signer
+				} else {
+					log.Printf("ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
+					//continue
+					if method == "installsc" {
+						// We do not store a ringsize > 2 of installsc calls. Only of SC interactions via sc_invoke for ringsize > 2 and just blank out the sender
+						//continue
+						wg.Done()
 					}
 				}
+				//time.Sleep(2 * time.Second)
+				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
+			} else if tx.TransactionType == transaction.REGISTRATION {
+				regTxCount++
+			} else if tx.TransactionType == transaction.BURN_TX {
+				// TODO: Handle burn_tx here
+				burnTxCount++
+			} else if tx.TransactionType == transaction.NORMAL {
+				// TODO: Handle normal tx here
+				normTxCount++
+
+				for j := 0; j < len(tx.Payloads); j++ {
+					var zhash crypto.Hash
+					if tx.Payloads[j].SCID != zhash {
+						log.Printf("TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
+						for _, v := range output.Txs[j].Ring[j] {
+							//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+							writeWait, _ := time.ParseDuration("10ms")
+							for Graviton_backend.Writing == 1 {
+								log.Printf("[Indexer-indexBlock-normTx-txLoop] GravitonDB is writing... sleeping for %v...", writeWait)
+								time.Sleep(writeWait)
+							}
+							Graviton_backend.Writing = 1
+							Graviton_backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(bl.Height)})
+							Graviton_backend.Writing = 0
+						}
+					}
+				}
+			} else {
+				//log.Printf("TX %v type is NOT handled.\n", bl.Tx_hashes[i])
 			}
-		} else {
-			//log.Printf("TX %v type is NOT handled.\n", bl.Tx_hashes[i])
-		}
+			wg.Done()
+		}(i)
 	}
+	wg.Wait()
 
 	//blheight := int64(bl.Height)
 	//normTxCount = int64(len(bl.Tx_hashes))
