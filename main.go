@@ -6,12 +6,10 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -195,7 +193,7 @@ func main() {
 	Gnomon.Indexers[search_filter] = defaultIndexer
 
 	// Setup ctrl+c exit
-	SetupCloseHandler(Graviton_backend, defaultIndexer)
+	//SetupCloseHandler(Graviton_backend, defaultIndexer)
 
 	// Readline GNOMON
 	RLI, err = readline.NewEx(&readline.Config{
@@ -298,7 +296,7 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
-				log.Printf("Ctrl-C received, ending loop. Hit it again to exit the program (This will be fixed..)\n")
+				log.Printf("Ctrl-C received, putting gnomes to sleep. This will take ~5sec.\n")
 				Gnomon.close()
 				return nil
 			} else {
@@ -315,12 +313,14 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 		}
 
 		switch {
+		case line == "help":
+			usage(l.Stderr())
 		case command == "listsc":
 			sclist := Graviton_backend.GetAllOwnersAndSCIDs()
 			for k, v := range sclist {
 				log.Printf("SCID: %v ; Owner: %v\n", k, v)
 			}
-		case command == "new_searchfilter":
+		case command == "new_sf":
 			if len(line_parts) >= 2 {
 				nsf := strings.Join(line_parts[1:], " ")
 				log.Printf("Adding new searchfilter '%v'\n", nsf)
@@ -379,6 +379,18 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 			} else {
 				log.Printf("listsc_byscid needs a single scid as argument\n")
 			}
+		case line == "quit":
+			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
+			Gnomon.close()
+			return nil
+		case line == "bye":
+			log.Printf("'bye' received, putting gnomes to sleep. This will take ~5sec.\n")
+			Gnomon.close()
+			return nil
+		case line == "exit":
+			log.Printf("'exit' received, putting gnomes to sleep. This will take ~5sec.\n")
+			Gnomon.close()
+			return nil
 		default:
 			log.Printf("You said: %v\n", strconv.Quote(line))
 		}
@@ -387,28 +399,53 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 	//return fmt.Errorf("can never reach here")
 }
 
+func usage(w io.Writer) {
+	io.WriteString(w, "commands:\n")
+	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
+	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
+	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
+	//io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
+
+	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
+	io.WriteString(w, "\t\033[1mexit\033[0m\t\tQuit the daemon\n")
+	io.WriteString(w, "\t\033[1mquit\033[0m\t\tQuit the daemon\n")
+}
+
 func (g *GnomonServer) close() {
 	g.Closing = true
 	for _, v := range g.Indexers {
 		v.Closing = true
-		writeWait, _ := time.ParseDuration("10ms")
-		for v.Backend.Writing == 1 {
-			log.Printf("[Main-close] GravitonDB is writing... sleeping for %v...", writeWait)
-			time.Sleep(writeWait)
-		}
-		v.Backend.Writing = 1
-		err := v.Backend.StoreLastIndexHeight(v.LastIndexedHeight)
-		if err != nil {
-			log.Printf("[close] ERR - Error storing last index height of search_filter '%v' : %v\n", v.SearchFilter, err)
-		}
-		v.Backend.Writing = 0
+		/*
+			// Moved this to after indexBlock within indexer
+			writeWait, _ := time.ParseDuration("10ms")
+			for v.Backend.Writing == 1 {
+				log.Printf("[Main-close] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+			v.Backend.Writing = 1
+			err := v.Backend.StoreLastIndexHeight(v.LastIndexedHeight)
+			if err != nil {
+				log.Printf("[close] ERR - Error storing last index height of search_filter '%v' : %v\n", v.SearchFilter, err)
+			}
+			v.Backend.Writing = 0
+		*/
 	}
+
+	time.Sleep(time.Second * 5)
+
+	for _, v := range g.Indexers {
+		v.Backend.DB.Close()
+	}
+	os.Exit(0)
 }
 
 // SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
 // program if it receives an interrupt from the OS. We then handle this by calling
 // our clean up procedure and exiting the program.
 // Reference: https://golangcode.com/handle-ctrl-c-exit-in-terminal/
+/*
 func SetupCloseHandler(Graviton_backend *storage.GravitonStore, defaultIndexer *indexer.Indexer) {
 	c := make(chan os.Signal)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -427,3 +464,4 @@ func SetupCloseHandler(Graviton_backend *storage.GravitonStore, defaultIndexer *
 		os.Exit(0)
 	}()
 }
+*/

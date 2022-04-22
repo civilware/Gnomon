@@ -145,6 +145,16 @@ func (indexer *Indexer) StartDaemonMode() {
 				continue
 			}
 
+			// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
+			writeWait, _ := time.ParseDuration("10ms")
+			for indexer.Backend.Writing == 1 {
+				log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+			indexer.Backend.Writing = 1
+			indexer.Backend.StoreLastIndexHeight(indexer.LastIndexedHeight)
+			indexer.Backend.Writing = 0
+
 			indexer.LastIndexedHeight++
 		}
 	}()
