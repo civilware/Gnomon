@@ -68,7 +68,8 @@ func (apiServer *ApiServer) listen() {
 	router.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	router.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
 	if apiServer.Config.MBLLookup {
-		router.HandleFunc("/api/getmbladdrs", apiServer.MBLLookupIndex)
+		router.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
+		router.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
 	}
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
@@ -88,7 +89,8 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
 	routerSSL.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
 	if apiServer.Config.MBLLookup {
-		routerSSL.HandleFunc("/api/getmbladdrs", apiServer.MBLLookupIndex)
+		routerSSL.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
+		routerSSL.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
 	}
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
@@ -425,7 +427,7 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 	}
 }
 
-func (apiServer *ApiServer) MBLLookupIndex(writer http.ResponseWriter, r *http.Request) {
+func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.Request) {
 	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	writer.Header().Set("Access-Control-Allow-Origin", "*")
 	writer.Header().Set("Cache-Control", "no-cache")
@@ -463,6 +465,80 @@ func (apiServer *ApiServer) MBLLookupIndex(writer http.ResponseWriter, r *http.R
 	allMiniBlocksByBlid := apiServer.Backend.GetMiniblockDetailsByHash(blid)
 
 	reply["mbl"] = allMiniBlocksByBlid
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	stats := apiServer.getStats()
+	if stats != nil {
+		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
+	} else {
+		// Default reply - for testing, initials etc.
+		reply["hello"] = "world"
+	}
+
+	// Query for SCID
+	addrkeys, ok := r.URL.Query()["address"]
+	var addr string
+
+	if !ok || len(addrkeys[0]) < 1 {
+		log.Printf("URL Param 'address' is missing. Debugging only.\n")
+		reply["mbl"] = nil
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			log.Printf("[API] Error serializing API response: %v\n", err)
+		}
+		return
+	} else {
+		addr = addrkeys[0]
+	}
+
+	allMiniBlocksByAddr := apiServer.Backend.GetMiniblockCountByAddress(addr)
+
+	reply["mbl"] = allMiniBlocksByAddr
+
+	err := json.NewEncoder(writer).Encode(reply)
+	if err != nil {
+		log.Printf("[API] Error serializing API response: %v\n", err)
+	}
+}
+
+func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Request) {
+	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
+	writer.Header().Set("Access-Control-Allow-Origin", "*")
+	writer.Header().Set("Cache-Control", "no-cache")
+	writer.WriteHeader(http.StatusOK)
+
+	reply := make(map[string]interface{})
+
+	stats := apiServer.getStats()
+	if stats != nil {
+		reply["numscs"] = stats["numscs"]
+		reply["regTxCount"] = stats["regTxCount"]
+		reply["burnTxCount"] = stats["burnTxCount"]
+		reply["normTxCount"] = stats["normTxCount"]
+	} else {
+		// Default reply - for testing, initials etc.
+		reply["hello"] = "world"
+	}
+
+	allMiniBlocks := apiServer.Backend.GetAllMiniblockDetails()
+
+	reply["mbl"] = allMiniBlocks
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {

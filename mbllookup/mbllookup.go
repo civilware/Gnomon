@@ -50,7 +50,6 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 
 	for _, v := range bl.MiniBlocks {
 		if !v.Final {
-
 			_, key_compressed, _, err := balance_tree.GetKeyValueFromHash(v.KeyHash[:16])
 
 			var acckey crypto.Point
@@ -61,14 +60,17 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
-			//currHash := v.GetHash().String()
-			//currMiner := astring.String()
-
-			//currMBL := &structures.MBLInfo{Hash: currHash, Miner: currMiner}
-			//mblinfo.Miniblocks = append(mblinfo.Miniblocks, currMBL)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
-			//mblinfo[k].Hash = v.GetHash().String()
-			//mblinfo[k].Miner = astring.String()
+		} else {
+			var acckey crypto.Point
+			err = acckey.DecodeCompressed(bl.Miner_TX.MinerAddress[:])
+			if err != nil {
+				log.Printf("Err decoding bl.Miner_TX.MinerAddress")
+				return mblinfo, err
+			}
+			astring := rpc.NewAddressFromKeys(&acckey)
+
+			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		}
 	}
 

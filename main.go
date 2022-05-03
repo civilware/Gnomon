@@ -315,6 +315,8 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 		switch {
 		case line == "help":
 			usage(l.Stderr())
+		case line == "version":
+			log.Printf("Version: %v", version)
 		case command == "listsc":
 			sclist := Graviton_backend.GetAllOwnersAndSCIDs()
 			for k, v := range sclist {
@@ -402,6 +404,7 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 func usage(w io.Writer) {
 	io.WriteString(w, "commands:\n")
 	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
+	io.WriteString(w, "\t\033[1mversion\033[0m\t\tShow gnomon version\n")
 	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
 	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")

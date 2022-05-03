@@ -637,6 +637,13 @@ func (g *GravitonStore) GetInvalidSCIDDeploys() map[string]uint64 {
 
 // Stores the miniblocks within a given blid
 func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*structures.MBLInfo) error {
+	for _, v := range mbldetails {
+		err := g.StoreMiniblockCountByAddress(v.Miner)
+		if err != nil {
+			log.Printf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
+		}
+	}
+
 	confBytes, err := json.Marshal(mbldetails)
 	if err != nil {
 		return fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v\n", err)
@@ -661,6 +668,86 @@ func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*s
 		return cerr
 	}
 	return nil
+}
+
+// Returns all miniblock details for synced chain
+func (g *GravitonStore) GetAllMiniblockDetails() map[string][]*structures.MBLInfo {
+	mbldetails := make(map[string][]*structures.MBLInfo)
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0)
+	tree, _ := ss.GetTree("miniblocks")
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for k, v, err := c.First(); err == nil; k, v, err = c.Next() {
+		var currdetails []*structures.MBLInfo
+		_ = json.Unmarshal(v, &currdetails)
+		mbldetails[string(k)] = currdetails
+	}
+
+	return mbldetails
+}
+
+// Stores counts of miniblock finders by address
+func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
+	currCount := g.GetMiniblockCountByAddress(addr)
+
+	// Add 1 to currCount
+	currCount++
+
+	confBytes, err := json.Marshal(currCount)
+	if err != nil {
+		return fmt.Errorf("[StoreMiniblockCountByAddress] could not marshal getinfo info: %v\n", err)
+	}
+
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreMiniblockCountByAddress] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("blockcount")
+	key := addr
+	tree.Put([]byte(key), confBytes) // insert a value
+	_, cerr := graviton.Commit(tree)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v\n", cerr)
+		return cerr
+	}
+	return nil
+}
+
+// Gets counts of miniblock finders by address
+func (g *GravitonStore) GetMiniblockCountByAddress(addr string) int64 {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[GetMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("blockcount") // use or create tree named by poolhost in config
+	key := addr
+
+	var miniblocks int64
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &miniblocks)
+		return miniblocks
+	}
+
+	return int64(0)
 }
 
 // Returns the miniblocks within a given blid if previously stored

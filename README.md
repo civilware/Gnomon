@@ -3,6 +3,7 @@
 * Smart Contract querying and indexing
 * Transaction querying and indexing
 * Transaction Markup Language
+* No custom daemon, no modified code.
 
 # Using Gnomon As Software
 Details coming soon.
