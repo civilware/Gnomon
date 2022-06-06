@@ -60,6 +60,7 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
+			//log.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		} else {
 			var acckey crypto.Point
@@ -70,6 +71,7 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
+			//log.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		}
 	}

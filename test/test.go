@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -19,6 +20,9 @@ import (
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/graviton"
 	"github.com/gorilla/websocket"
+
+	"github.com/deroproject/derohe/block"
+	"github.com/deroproject/derohe/transaction"
 )
 
 type Client struct {
@@ -46,6 +50,76 @@ var DeroDB = &Derodbstore{}
 // This is for testing and is inconsistent/unreliable code. Not intended to be used for anything other than poking at different calls and details.
 func main() {
 	log.Printf("Hello World")
+
+	var blid = "256480179e6e02cf386fbf1d61a5401bf61998eb1e8ea72dd46054b10a7be972"
+	var err error
+
+	var client = &Client{}
+	var endpoint = "127.0.0.1:10102"
+
+	client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+endpoint+"/ws", nil)
+	input_output := rwc.New(client.WS)
+	client.RPC = jrpc2.NewClient(channel.RawJSON(input_output, input_output), nil)
+
+	// notify user of any state change
+	// if daemon connection breaks or comes live again
+	if err == nil {
+		if !Connected {
+			log.Printf("[Connect] Connection to RPC server successful - ws://%s/ws\n", endpoint)
+			Connected = true
+		}
+	} else {
+		log.Printf("[Connect] ERROR connecting to daemon %v\n", err)
+
+		if Connected {
+			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws\n", endpoint)
+		}
+		Connected = false
+		return
+	}
+
+	var io rpc.GetBlock_Result
+	var ip = rpc.GetBlock_Params{Hash: blid}
+
+	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
+		log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
+		return
+	}
+
+	var bl block.Block
+	var block_bin []byte
+
+	block_bin, _ = hex.DecodeString(io.Blob)
+	bl.Deserialize(block_bin)
+
+	for i := 0; i < len(bl.Tx_hashes); i++ {
+		var tx transaction.Transaction
+		//var sc_args rpc.Arguments
+		//var sc_fees uint64
+		//var sender string
+
+		var inputparam rpc.GetTransaction_Params
+		var output rpc.GetTransaction_Result
+
+		inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
+
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
+			log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
+			//return err
+			//continue
+			//wg.Done()
+		}
+
+		tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
+		tx.Deserialize(tx_bin)
+
+		// TODO: Add count for registration TXs and store the following on normal txs: IF SCID IS PRESENT, store tx details + ring members + fees + etc. Use later for scid balance queries
+		if tx.TransactionType == transaction.SC_TX {
+			//sc_args = tx.SCDATA
+			//sc_fees = tx.Fees()
+			log.Printf("TX: %v", len(tx.Payloads))
+		}
+	}
 
 	/*
 		// Height sorting/testing

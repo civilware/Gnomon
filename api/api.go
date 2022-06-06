@@ -66,7 +66,7 @@ func (apiServer *ApiServer) listen() {
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	router.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	router.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
-	router.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
+	router.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCID)
 	if apiServer.Config.MBLLookup {
 		router.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
 		router.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
@@ -87,7 +87,7 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
 	routerSSL.HandleFunc("/api/scvarsbyheight", apiServer.InvokeSCVarsByHeight)
 	routerSSL.HandleFunc("/api/invalidscids", apiServer.InvalidSCIDStats)
-	routerSSL.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCIDByAddr)
+	routerSSL.HandleFunc("/api/scidprivtx", apiServer.NormalTxWithSCID)
 	if apiServer.Config.MBLLookup {
 		routerSSL.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
 		routerSSL.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
@@ -217,6 +217,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 			}
 		}
 
+		reply["addrscidinvokescount"] = len(addrscidinvokes)
 		reply["addrscidinvokes"] = addrscidinvokes
 	} else if address != "" && scid == "" {
 		// If address and no scid, return combined results of all instances address is defined (invokes and installs)
@@ -230,10 +231,13 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 			}
 		}
 
+		reply["addrinvokescount"] = len(addrinvokes)
 		reply["addrinvokes"] = addrinvokes
 	} else if address == "" && scid != "" {
 		// If no address and scid only, return invokes of scid
-		reply["scidinvokes"] = apiServer.Backend.GetAllSCIDInvokeDetails(scid)
+		scidinvokes := apiServer.Backend.GetAllSCIDInvokeDetails(scid)
+		reply["scidinvokescount"] = len(scidinvokes)
+		reply["scidinvokes"] = scidinvokes
 	}
 
 	err := json.NewEncoder(writer).Encode(reply)
@@ -344,7 +348,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	}
 }
 
-func (apiServer *ApiServer) NormalTxWithSCIDByAddr(writer http.ResponseWriter, r *http.Request) {
+func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http.Request) {
 	writer.Header().Set("Content-Type", "application/json; charset=UTF-8")
 	writer.Header().Set("Access-Control-Allow-Origin", "*")
 	writer.Header().Set("Cache-Control", "no-cache")
@@ -364,24 +368,41 @@ func (apiServer *ApiServer) NormalTxWithSCIDByAddr(writer http.ResponseWriter, r
 	}
 
 	// Query for SCID
-	addrkeys, ok := r.URL.Query()["address"]
-	var addr string
+	scidkeys, ok := r.URL.Query()["scid"]
+	var scid string
+	var address string
 
-	if !ok || len(addrkeys[0]) < 1 {
-		log.Printf("URL Param 'addr' is missing. Debugging only.\n")
+	if !ok || len(scidkeys[0]) < 1 {
+		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+	} else {
+		scid = scidkeys[0]
+	}
+
+	// Query for address
+	addresskeys, ok := r.URL.Query()["address"]
+
+	if !ok || len(addresskeys[0]) < 1 {
+		log.Printf("URL Param 'address' is missing.\n")
+	} else {
+		address = addresskeys[0]
+	}
+
+	if address == "" && scid == "" {
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
 			log.Printf("[API] Error serializing API response: %v\n", err)
 		}
 		return
-	} else {
-		addr = addrkeys[0]
 	}
 
-	allNormTxWithSCIDByAddr := apiServer.Backend.GetAllNormalTxWithSCIDByAddr(addr)
+	allNormTxWithSCIDByAddr := apiServer.Backend.GetAllNormalTxWithSCIDByAddr(address)
+	allNormTxWithSCIDBySCID := apiServer.Backend.GetAllNormalTxWithSCIDBySCID(scid)
 
 	reply["normtxwithscidbyaddr"] = allNormTxWithSCIDByAddr
+	reply["normtxwithscidbyaddrcount"] = len(allNormTxWithSCIDByAddr)
+	reply["normtxwithscidbyscid"] = allNormTxWithSCIDBySCID
+	reply["normtxwithscidbyscidcount"] = len(allNormTxWithSCIDBySCID)
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {

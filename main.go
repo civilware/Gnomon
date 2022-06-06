@@ -215,7 +215,7 @@ func main() {
 
 	go func() {
 		for {
-			if err = readline_loop(RLI, Graviton_backend); err == nil {
+			if err = Gnomon.readline_loop(RLI); err == nil {
 				break
 			}
 		}
@@ -276,7 +276,7 @@ func filterInput(r rune) (rune, bool) {
 	return r, true
 }
 
-func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore) (err error) {
+func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -297,7 +297,7 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				log.Printf("Ctrl-C received, putting gnomes to sleep. This will take ~5sec.\n")
-				Gnomon.close()
+				g.close()
 				return nil
 			} else {
 				continue
@@ -318,9 +318,12 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 		case line == "version":
 			log.Printf("Version: %v", version)
 		case command == "listsc":
-			sclist := Graviton_backend.GetAllOwnersAndSCIDs()
-			for k, v := range sclist {
-				log.Printf("SCID: %v ; Owner: %v\n", k, v)
+			for ki, vi := range g.Indexers {
+				log.Printf("- Indexer '%v'", ki)
+				sclist := vi.Backend.GetAllOwnersAndSCIDs()
+				for k, v := range sclist {
+					log.Printf("SCID: %v ; Owner: %v\n", k, v)
+				}
 			}
 		case command == "new_sf":
 			if len(line_parts) >= 2 {
@@ -334,64 +337,95 @@ func readline_loop(l *readline.Instance, Graviton_backend *storage.GravitonStore
 				nBackend := storage.NewGravDB(nDBFolder, "25ms")
 
 				// Start default indexer based on search_filter params
-				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(Gnomon.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, Gnomon.DaemonEndpoint, Gnomon.RunMode, Gnomon.MBLLookup)
+				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup)
 				go nIndexer.StartDaemonMode()
-				Gnomon.Indexers[nsf] = nIndexer
+				g.Indexers[nsf] = nIndexer
 			}
 		case command == "listsc_byowner":
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
-				sclist := Graviton_backend.GetAllOwnersAndSCIDs()
-				var count int64
-				for k, v := range sclist {
-					if v == line_parts[1] {
-						log.Printf("SCID: %v ; Owner: %v\n", k, v)
-						invokedetails := Graviton_backend.GetAllSCIDInvokeDetails(k)
-						for _, invoke := range invokedetails {
-							log.Printf("%v", invoke)
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count int64
+					for k, v := range sclist {
+						if v == line_parts[1] {
+							log.Printf("SCID: %v ; Owner: %v\n", k, v)
+							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							for _, invoke := range invokedetails {
+								log.Printf("%v", invoke)
+							}
+							count++
 						}
-						count++
 					}
-				}
 
-				if count == 0 {
-					log.Printf("No SCIDs installed by %v\n", line_parts[1])
+					if count == 0 {
+						log.Printf("No SCIDs installed by %v\n", line_parts[1])
+					}
 				}
 			} else {
 				log.Printf("listsc_byowner needs a single owner address as argument\n")
 			}
 		case command == "listsc_byscid":
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
-				sclist := Graviton_backend.GetAllOwnersAndSCIDs()
-				var count int64
-				for k, v := range sclist {
-					if k == line_parts[1] {
-						log.Printf("SCID: %v ; Owner: %v\n", k, v)
-						invokedetails := Graviton_backend.GetAllSCIDInvokeDetails(k)
-						for _, invoke := range invokedetails {
-							log.Printf("%v\n", invoke)
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count int64
+					for k, v := range sclist {
+						if k == line_parts[1] {
+							log.Printf("SCID: %v ; Owner: %v\n", k, v)
+							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							for _, invoke := range invokedetails {
+								log.Printf("%v\n", invoke)
+							}
+							count++
 						}
-						count++
 					}
-				}
 
-				if count == 0 {
-					log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					if count == 0 {
+						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					}
 				}
 			} else {
 				log.Printf("listsc_byscid needs a single scid as argument\n")
 			}
+		case command == "pop":
+			switch len(line_parts) {
+			case 1:
+				// Change back 1 height
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					vi.LastIndexedHeight = vi.LastIndexedHeight - int64(1)
+				}
+			case 2:
+				pop_count := 0
+				if s, err := strconv.Atoi(line_parts[1]); err == nil {
+					pop_count = s
+
+					// Change back pop_count height
+					for ki, vi := range g.Indexers {
+						log.Printf("- Indexer '%v'", ki)
+						vi.LastIndexedHeight = vi.LastIndexedHeight - int64(pop_count)
+					}
+				} else {
+					log.Printf("POP needs argument n to pop this many blocks from the top")
+				}
+
+			default:
+				log.Printf("POP needs argument n to pop this many blocks from the top")
+			}
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
-			Gnomon.close()
+			g.close()
 			return nil
 		case line == "bye":
 			log.Printf("'bye' received, putting gnomes to sleep. This will take ~5sec.\n")
-			Gnomon.close()
+			g.close()
 			return nil
 		case line == "exit":
 			log.Printf("'exit' received, putting gnomes to sleep. This will take ~5sec.\n")
-			Gnomon.close()
+			g.close()
 			return nil
 		default:
 			log.Printf("You said: %v\n", strconv.Quote(line))

@@ -300,6 +300,9 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 				//return err
 				//continue
 				wg.Done()
+				// TODO - fix/handle/ensure
+				//log.Printf("Node corruption at height '%v', continuing", topoheight)
+				//return
 			}
 
 			tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
@@ -342,7 +345,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					}
 				}
 				//time.Sleep(2 * time.Second)
-				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Fees: sc_fees})
+				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Payloads: tx.Payloads, Fees: sc_fees, Height: topoheight})
 			} else if tx.TransactionType == transaction.REGISTRATION {
 				regTxCount++
 			} else if tx.TransactionType == transaction.BURN_TX {
@@ -532,9 +535,18 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 							log.Printf("Error storing owner: %v\n", err)
 						}
 
+						err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
+						if err != nil {
+							log.Printf("Err storing invoke details. Err: %v\n", err)
+							time.Sleep(5 * time.Second)
+							return err
+						}
+
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
 						Graviton_backend.Writing = 0
+
+						log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
 					} else {
 						log.Printf("SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("10ms")
@@ -548,7 +560,25 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					}
 				}
 			} else {
-				if scidExist(validated_scs, bl_sctxs[i].Scid) {
+				if scidExist(validated_scs, bl_sctxs[i].Scid) || search_filter == "" {
+					// TODO: Testing and may remove this later, but add to validated list if it matches "" searchfilter no matter the height.  Adding with no signer. Need to also update later to work no matter search filter for pruned nodes etc.
+					if !scidExist(validated_scs, bl_sctxs[i].Scid) {
+						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, "")
+						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
+
+						writeWait, _ := time.ParseDuration("10ms")
+						for Graviton_backend.Writing == 1 {
+							log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						Graviton_backend.Writing = 1
+						err = Graviton_backend.StoreOwner(bl_sctxs[i].Scid, "")
+						if err != nil {
+							log.Printf("Error storing owner: %v\n", err)
+						}
+						Graviton_backend.Writing = 0
+					}
+
 					//log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.\n", bl_sctxs[i].Scid)
 					// TODO: Modify this to be either all entrypoints, just Start, or a subset that is defined in pre-run params
 					//if bl_sctxs[i].entrypoint == "Start" {
@@ -576,6 +606,8 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "scinvoke", topoheight)
 						Graviton_backend.Writing = 0
+
+						log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
 					} else {
 						//log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}

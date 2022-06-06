@@ -2,6 +2,7 @@ package structures
 
 import (
 	"github.com/deroproject/derohe/rpc"
+	"github.com/deroproject/derohe/transaction"
 )
 
 type SCTXParse struct {
@@ -12,7 +13,9 @@ type SCTXParse struct {
 	Method     string
 	Sc_args    rpc.Arguments
 	Sender     string
+	Payloads   []transaction.AssetPayload
 	Fees       uint64
+	Height     int64
 }
 
 type BurnTXParse struct {

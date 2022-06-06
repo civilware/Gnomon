@@ -300,6 +300,42 @@ func (g *GravitonStore) GetAllNormalTxWithSCIDByAddr(addr string) (normTxsWithSC
 	return nil
 }
 
+// Returns all normal txs with SCIDs based on a given SCID
+func (g *GravitonStore) GetAllNormalTxWithSCIDBySCID(scid string) (normTxsWithSCID []*structures.NormalTXWithSCIDParse) {
+	var resultset []string
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	treename := "normaltxwithscid"
+	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for _, v, err := c.First(); err == nil; _, v, err = c.Next() {
+		var currdetails []*structures.NormalTXWithSCIDParse
+		_ = json.Unmarshal(v, &currdetails)
+		for _, cv := range currdetails {
+			if cv.Scid == scid && !idExist(resultset, cv.Txid) {
+				normTxsWithSCID = append(normTxsWithSCID, cv)
+				resultset = append(resultset, cv.Txid)
+			}
+		}
+	}
+
+	return normTxsWithSCID
+}
+
+// Check if value exists within a string array/slice
+func idExist(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Stores all scinvoke details of a given scid
 func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.SCTXParse) error {
 	confBytes, err := json.Marshal(invokedetails)
