@@ -396,7 +396,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				// Change back 1 height
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					vi.LastIndexedHeight = vi.LastIndexedHeight - int64(1)
+					if int64(1) > vi.LastIndexedHeight {
+						vi.LastIndexedHeight = 1
+					} else {
+						vi.LastIndexedHeight = vi.LastIndexedHeight - int64(1)
+					}
 				}
 			case 2:
 				pop_count := 0
@@ -406,7 +410,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					// Change back pop_count height
 					for ki, vi := range g.Indexers {
 						log.Printf("- Indexer '%v'", ki)
-						vi.LastIndexedHeight = vi.LastIndexedHeight - int64(pop_count)
+						if int64(pop_count) > vi.LastIndexedHeight {
+							vi.LastIndexedHeight = 1
+						} else {
+							vi.LastIndexedHeight = vi.LastIndexedHeight - int64(pop_count)
+						}
 					}
 				} else {
 					log.Printf("POP needs argument n to pop this many blocks from the top")
