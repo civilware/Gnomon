@@ -265,6 +265,15 @@ func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID 
 		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
 		_ = json.Unmarshal(currNormTxsWithSCID, &normTxsWithSCID)
 
+		for _, v := range normTxsWithSCID {
+			if v.Txid == normTxWithSCID.Txid {
+				// Return nil if already exists in array.
+				// Clause for this is in event we pop backwards in time and already have this data stored.
+				// TODO: What if interaction happened on false-chain and pop to retain correct chain. Bad data may be stored here still, as it isn't removed. Need fix for this in future.
+				return nil
+			}
+		}
+
 		normTxsWithSCID = append(normTxsWithSCID, normTxWithSCID)
 	}
 	newNormTxsWithSCID, err = json.Marshal(normTxsWithSCID)
@@ -570,6 +579,14 @@ func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, interactiontype 
 		// Retrieve value and conovert to SCIDInteractionHeight, so that you can manipulate and update db
 		_ = json.Unmarshal(currSCIDInteractionHeight, &interactionHeight)
 
+		for _, v := range interactionHeight {
+			if v == height {
+				// Return nil if already exists in array.
+				// Clause for this is in event we pop backwards in time and already have this data stored.
+				// TODO: What if interaction happened on false-chain and pop to retain correct chain. Bad data may be stored here still, as it isn't removed. Need fix for this in future.
+				return nil
+			}
+		}
 		interactionHeight = append(interactionHeight, height)
 	}
 	newInteractionHeight, err = json.Marshal(interactionHeight)
