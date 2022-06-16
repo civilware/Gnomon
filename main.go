@@ -32,7 +32,7 @@ type GnomonServer struct {
 }
 
 var command_line string = `Gnomon
-Gnomon Indexing Service: Index DERO's blockchain for Artificer NFT deployments/listings/etc.
+Gnomon Indexing Service: Index DERO's blockchain for Smart Contract deployments/listings/etc. as well as other data analysis.
 
 Usage:
   gnomon [options]
@@ -48,7 +48,8 @@ Options:
   --start-topoheight=<31170>	Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
   --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
-  --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory`
+  --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
+  --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.`
 
 var Exit_In_Progress = make(chan bool)
 
@@ -57,6 +58,7 @@ var api_endpoint string
 var api_ssl_endpoint string
 var get_info_ssl_endpoint string
 var sslenabled bool
+var closeondisconnect bool
 var search_filter string
 var mbl bool
 var version = "0.1a"
@@ -153,6 +155,14 @@ func main() {
 	}
 	Gnomon.MBLLookup = mbl
 
+	// Edge flag to be able to close on disconnect from a daemon after x failures. Can be used for smaller nodes or other areas where you want the API to offline when no new data is ingested/indexed.
+	if arguments["--close-on-disconnect"] != nil {
+		closeondisconnectstr := arguments["--close-on-disconnect"].(string)
+		if closeondisconnectstr == "true" {
+			closeondisconnect = true
+		}
+	}
+
 	// Database
 	var shasum string
 	if search_filter == "" {
@@ -182,7 +192,7 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -338,7 +348,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup)
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect)
 				go nIndexer.StartDaemonMode()
 				g.Indexers[nsf] = nIndexer
 			}

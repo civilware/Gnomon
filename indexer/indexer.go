@@ -39,6 +39,7 @@ type Indexer struct {
 	Endpoint          string
 	RunMode           string
 	MBLLookup         bool
+	CloseOnDisconnect bool
 }
 
 var daemon_endpoint string
@@ -46,7 +47,7 @@ var Connected bool = false
 var validated_scs []string
 var chain_topoheight int64
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool) *Indexer {
 	return &Indexer{
 		LastIndexedHeight: last_indexedheight,
 		SearchFilter:      search_filter,
@@ -55,6 +56,7 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, l
 		Endpoint:          endpoint,
 		RunMode:           runmode,
 		MBLLookup:         mbllookup,
+		CloseOnDisconnect: closeondisconnect,
 	}
 }
 
@@ -62,7 +64,6 @@ func (indexer *Indexer) StartDaemonMode() {
 	var err error
 
 	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
-	//go func() {
 	for {
 		if indexer.Closing {
 			// Break out on closing call
@@ -71,11 +72,11 @@ func (indexer *Indexer) StartDaemonMode() {
 		log.Printf("Trying to connect...")
 		err = indexer.RPC.Connect(indexer.Endpoint)
 		if err != nil {
+			time.Sleep(1 * time.Second)
 			continue
 		}
 		break
 	}
-	//}()
 	time.Sleep(1 * time.Second)
 	//log.Printf("%v", indexer.RPC.WS)
 
@@ -84,7 +85,22 @@ func (indexer *Indexer) StartDaemonMode() {
 	time.Sleep(1 * time.Second)
 
 	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
-	if indexer.SearchFilter == "" {
+	var getSCResults rpc.GetSC_Result
+	getSCParams := rpc.GetSC_Params{SCID: "0000000000000000000000000000000000000000000000000000000000000001", Code: true, Variables: false, TopoHeight: indexer.LastIndexedHeight}
+	if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+		//log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
+	}
+
+	var contains bool
+
+	// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+	if indexer.SearchFilter == "" && err != nil {
+		contains = true
+	} else {
+		contains = strings.Contains(getSCResults.Code, indexer.SearchFilter)
+	}
+
+	if contains {
 		validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
 		writeWait, _ := time.ParseDuration("50ms")
 		for indexer.Backend.Writing == 1 {
@@ -97,29 +113,6 @@ func (indexer *Indexer) StartDaemonMode() {
 			log.Printf("Error storing owner: %v\n", err)
 		}
 		indexer.Backend.Writing = 0
-	} else {
-		var getSCResults rpc.GetSC_Result
-		getSCParams := rpc.GetSC_Params{SCID: "0000000000000000000000000000000000000000000000000000000000000001", Code: true, Variables: false, TopoHeight: indexer.LastIndexedHeight}
-		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-			//log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
-		}
-
-		contains := strings.Contains(getSCResults.Code, indexer.SearchFilter)
-
-		if contains {
-			validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
-			writeWait, _ := time.ParseDuration("50ms")
-			for indexer.Backend.Writing == 1 {
-				//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-				time.Sleep(writeWait)
-			}
-			indexer.Backend.Writing = 1
-			err = indexer.Backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
-			if err != nil {
-				log.Printf("Error storing owner: %v\n", err)
-			}
-			indexer.Backend.Writing = 0
-		}
 	}
 
 	storedindex := indexer.Backend.GetLastIndexHeight()
@@ -154,6 +147,77 @@ func (indexer *Indexer) StartDaemonMode() {
 
 			blid, err := indexer.RPC.getBlockHash(uint64(indexer.LastIndexedHeight))
 			if err != nil {
+				// Handle pruned nodes index errors... find height that they have blocks able to be indexed
+				log.Printf("Checking if strings contain: %v", err.Error())
+				if strings.Contains(err.Error(), "GetBlockHeaderByTopoHeight failed") {
+					currIndex := indexer.LastIndexedHeight
+					rewindIndex := int64(0)
+					blockJump := int64(10000)
+					for {
+						if indexer.Closing {
+							// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
+							writeWait, _ := time.ParseDuration("50ms")
+							for indexer.Backend.Writing == 1 {
+								//log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
+								time.Sleep(writeWait)
+							}
+							indexer.Backend.Writing = 1
+							indexer.Backend.StoreLastIndexHeight(currIndex)
+							indexer.Backend.Writing = 0
+							// Break out on closing call
+							break
+						}
+						_, err = indexer.RPC.getBlockHash(uint64(currIndex))
+						if err != nil {
+							//if strings.Contains(err.Error(), "GetBlockHeaderByTopoHeight failed") {
+							//time.Sleep(200 * time.Millisecond)	// sleep for node spam, not *required* but can be useful for lesser nodes in brief catchup time.
+							// Increase block by 10 to not spam the daemon at every single block, but skip along a little bit to move faster/more less impact to node. This can be modified if required.
+							if (currIndex + blockJump) > indexer.ChainHeight {
+								currIndex = indexer.ChainHeight
+							} else {
+								currIndex += blockJump
+							}
+							log.Printf("GetBlock failed - checking %v", currIndex)
+							//}
+						} else {
+							// Self-contain and loop through at most 10 or X blocks
+							log.Printf("GetBlock worked at %v", currIndex)
+							for {
+								if indexer.Closing {
+									// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
+									writeWait, _ := time.ParseDuration("50ms")
+									for indexer.Backend.Writing == 1 {
+										//log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
+										time.Sleep(writeWait)
+									}
+									indexer.Backend.Writing = 1
+									indexer.Backend.StoreLastIndexHeight(rewindIndex)
+									indexer.Backend.Writing = 0
+
+									// Break out on closing call
+									break
+								}
+								if rewindIndex == 0 {
+									rewindIndex = currIndex - blockJump + 1
+								} else {
+									log.Printf("Checking GetBlock at %v", rewindIndex)
+									_, err = indexer.RPC.getBlockHash(uint64(rewindIndex))
+									if err != nil {
+										rewindIndex++
+										//time.Sleep(200 * time.Millisecond)	// sleep for node spam, not *required* but can be useful for lesser nodes in brief catchup time.
+									} else {
+										log.Printf("GetBlock worked at %v - continuing as normal", rewindIndex+1)
+										// Break out, we found the earliest block detail
+										indexer.LastIndexedHeight = rewindIndex + 1
+										break
+									}
+								}
+							}
+							break
+						}
+					}
+				}
+
 				log.Printf("[mainFOR] ERROR - %v\n", err)
 				time.Sleep(1 * time.Second)
 				continue
@@ -264,8 +328,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 	var ip = rpc.GetBlock_Params{Hash: blid}
 
 	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
-		log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
-		return err
+		return fmt.Errorf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
 	}
 
 	var bl block.Block
@@ -317,10 +380,13 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
 
 			if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-				log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
+				//log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
 				//return err
 				//continue
 				wg.Done()
+				// If we error, this could be due to regtxn not valid on pruned node or other reasons. We will just nil the err and then return and move on.
+				err = nil
+				return
 				// TODO - fix/handle/ensure
 				//log.Printf("Node corruption at height '%v', continuing", topoheight)
 				//return
@@ -525,8 +591,8 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 				code := fmt.Sprintf("%v", bl_sctxs[i].Sc_args.Value("SC_CODE", "S"))
 
-				// Temporary check - will need something more robust to code compare potentially all except InitializePrivate() with the template file.
-				//contains := strings.Contains(code, "200 STORE(\"artificerfee\", 1)")
+				// Temporary check - will need something more robust to code compare potentially all except InitializePrivate() with a given template file or other filter inputs.
+				//contains := strings.Contains(code, "200 STORE(\"somevar\", 1)")
 				if search_filter == "" {
 					contains = true
 				} else {
@@ -534,14 +600,14 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 				}
 
 				if !contains {
-					// Then reject the validation that this is an artificer installsc action and move on
+					// Then reject the validation that this is an installsc action and move on
 					log.Printf("SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
 					scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
 
 					if len(scVars) > 0 {
-						// Append into db for artificer validated SC
+						// Append into db for validated SC
 						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
 
@@ -581,7 +647,6 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					}
 				}
 			} else {
-				// TODO: Testing and may remove this later, but add to validated list if it matches "" searchfilter no matter the height.  Adding with no signer. Need to also update later to work no matter search filter for pruned nodes etc.
 				if !scidExist(validated_scs, bl_sctxs[i].Scid) {
 
 					// Validate SCID is *actually* a valid SCID
@@ -671,7 +736,7 @@ func (client *Client) getBlockHash(height uint64) (hash string, err error) {
 
 	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
 		log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v\n", err)
-		return hash, err
+		return hash, fmt.Errorf("GetBlockHeaderByTopoHeight failed: %v\n", err)
 	} else {
 		//log.Printf("[getBlockHash] Retrieved block header from topoheight %v\n", height)
 		//mainnet = !info.Testnet // inverse of testnet is mainnet
@@ -693,15 +758,22 @@ func (indexer *Indexer) getInfo() {
 		}
 		var err error
 
-		//var info rpc.GetInfo_Result
 		var info *structures.GetInfo
 
 		// collect all the data afresh,  execute rpc to service
 		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetInfo", nil, &info); err != nil {
-			log.Printf("[getInfo] ERROR - GetInfo failed: %v\n", err)
+			//log.Printf("[getInfo] ERROR - GetInfo failed: %v\n", err)
+
+			// TODO: Perhaps just a .Closing = true call here and then gnomonserver can be polling for any indexers with .Closing then close the rest cleanly. If packaged, then just have to handle themselves w/ .Close()
+			if reconnect_count >= 5 && indexer.CloseOnDisconnect {
+				indexer.Close()
+				break
+			}
 			time.Sleep(1 * time.Second)
 			indexer.RPC.Connect(indexer.Endpoint) // Attempt to re-connect now
+
 			reconnect_count++
+
 			continue
 		} else {
 			if reconnect_count > 0 {
@@ -809,9 +881,12 @@ func (client *Client) getSCVariables(scid string, topoheight int64) []*structure
 
 // Close cleanly the indexer
 func (ind *Indexer) Close() {
+	// Tell indexer a closing operation is happening; this will close out loops on next iteration
 	ind.Closing = true
 
+	// Sleep for safety
 	time.Sleep(time.Second * 5)
 
+	// Close out grav db cleanly
 	ind.Backend.DB.Close()
 }
