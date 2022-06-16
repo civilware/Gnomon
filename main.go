@@ -226,7 +226,7 @@ func main() {
 		for {
 			select {
 			case <-Exit_In_Progress:
-				Gnomon.close()
+				Gnomon.Close()
 				return
 			default:
 			}
@@ -297,7 +297,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		if err == readline.ErrInterrupt {
 			if len(line) == 0 {
 				log.Printf("Ctrl-C received, putting gnomes to sleep. This will take ~5sec.\n")
-				g.close()
+				g.Close()
 				return nil
 			} else {
 				continue
@@ -425,15 +425,15 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			}
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
-			g.close()
+			g.Close()
 			return nil
 		case line == "bye":
 			log.Printf("'bye' received, putting gnomes to sleep. This will take ~5sec.\n")
-			g.close()
+			g.Close()
 			return nil
 		case line == "exit":
 			log.Printf("'exit' received, putting gnomes to sleep. This will take ~5sec.\n")
-			g.close()
+			g.Close()
 			return nil
 		default:
 			log.Printf("You said: %v\n", strconv.Quote(line))
@@ -458,31 +458,26 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mquit\033[0m\t\tQuit the daemon\n")
 }
 
-func (g *GnomonServer) close() {
+func (g *GnomonServer) Close() {
 	g.Closing = true
+	/*
+		for _, v := range g.Indexers {
+			v.Closing = true
+		}
+
+		time.Sleep(time.Second * 5)
+
+		for _, v := range g.Indexers {
+			v.Backend.DB.Close()
+		}
+	*/
+
 	for _, v := range g.Indexers {
-		v.Closing = true
-		/*
-			// Moved this to after indexBlock within indexer
-			writeWait, _ := time.ParseDuration("10ms")
-			for v.Backend.Writing == 1 {
-				log.Printf("[Main-close] GravitonDB is writing... sleeping for %v...", writeWait)
-				time.Sleep(writeWait)
-			}
-			v.Backend.Writing = 1
-			err := v.Backend.StoreLastIndexHeight(v.LastIndexedHeight)
-			if err != nil {
-				log.Printf("[close] ERR - Error storing last index height of search_filter '%v' : %v\n", v.SearchFilter, err)
-			}
-			v.Backend.Writing = 0
-		*/
+		go v.Close()
 	}
 
 	time.Sleep(time.Second * 5)
 
-	for _, v := range g.Indexers {
-		v.Backend.DB.Close()
-	}
 	os.Exit(0)
 }
 

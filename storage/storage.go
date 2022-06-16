@@ -741,6 +741,34 @@ func (g *GravitonStore) GetAllMiniblockDetails() map[string][]*structures.MBLInf
 	return mbldetails
 }
 
+// Returns the miniblocks within a given blid if previously stored
+func (g *GravitonStore) GetMiniblockDetailsByHash(blid string) []*structures.MBLInfo {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[GetMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	tree, _ := ss.GetTree("miniblocks") // use or create tree named by poolhost in config
+	key := blid
+
+	var miniblocks []*structures.MBLInfo
+
+	v, _ := tree.Get([]byte(key))
+
+	if v != nil {
+		_ = json.Unmarshal(v, &miniblocks)
+		return miniblocks
+	}
+
+	return nil
+}
+
 // Stores counts of miniblock finders by address
 func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
 	currCount := g.GetMiniblockCountByAddress(addr)
@@ -801,34 +829,6 @@ func (g *GravitonStore) GetMiniblockCountByAddress(addr string) int64 {
 	}
 
 	return int64(0)
-}
-
-// Returns the miniblocks within a given blid if previously stored
-func (g *GravitonStore) GetMiniblockDetailsByHash(blid string) []*structures.MBLInfo {
-	store := g.DB
-	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
-
-	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
-	for g.migrating == 1 {
-		log.Printf("[GetMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
-		time.Sleep(g.DBMigrateWait)
-		store = g.DB
-		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
-	}
-
-	tree, _ := ss.GetTree("miniblocks") // use or create tree named by poolhost in config
-	key := blid
-
-	var miniblocks []*structures.MBLInfo
-
-	v, _ := tree.Get([]byte(key))
-
-	if v != nil {
-		_ = json.Unmarshal(v, &miniblocks)
-		return miniblocks
-	}
-
-	return nil
 }
 
 // ---- End Application Graviton/Backend functions ---- //

@@ -189,7 +189,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -198,7 +198,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		log.Printf("URL Param 'address' is missing.\n")
+		//log.Printf("URL Param 'address' is missing.\n")
 	} else {
 		address = addresskeys[0]
 	}
@@ -271,7 +271,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	var height string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
@@ -286,7 +286,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	heightkey, ok := r.URL.Query()["height"]
 
 	if !ok || len(heightkey[0]) < 1 {
-		log.Printf("URL Param 'height' is missing.\n")
+		//log.Printf("URL Param 'height' is missing.\n")
 	} else {
 		height = heightkey[0]
 	}
@@ -373,7 +373,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -382,7 +382,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		log.Printf("URL Param 'address' is missing.\n")
+		//log.Printf("URL Param 'address' is missing.\n")
 	} else {
 		address = addresskeys[0]
 	}
@@ -472,7 +472,7 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 	var blid string
 
 	if !ok || len(blidkeys[0]) < 1 {
-		log.Printf("URL Param 'blid' is missing. Debugging only.\n")
+		//log.Printf("URL Param 'blid' is missing. Debugging only.\n")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
@@ -517,7 +517,7 @@ func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.
 	var addr string
 
 	if !ok || len(addrkeys[0]) < 1 {
-		log.Printf("URL Param 'address' is missing. Debugging only.\n")
+		//log.Printf("URL Param 'address' is missing. Debugging only.\n")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
