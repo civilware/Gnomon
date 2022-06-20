@@ -17,12 +17,10 @@ import (
 	"github.com/civilware/Gnomon/structures"
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/graviton"
 	"github.com/gorilla/websocket"
-
-	"github.com/deroproject/derohe/block"
-	"github.com/deroproject/derohe/transaction"
 )
 
 type Client struct {
@@ -86,39 +84,69 @@ func main() {
 		return
 	}
 
-	var bl block.Block
-	var block_bin []byte
+	// Gets SC variable details
+	var variables []*structures.SCIDVariable
 
-	block_bin, _ = hex.DecodeString(io.Blob)
-	bl.Deserialize(block_bin)
+	var getSCResults rpc.GetSC_Result
+	getSCParams := rpc.GetSC_Params{SCID: "ae55db1581b79f02f86b70fc338a7b91b14ded071a31972d9cfdb0eca6e302af", Code: false, Variables: true, TopoHeight: 529769}
+	if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+		log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
+		return
+	}
 
-	for i := 0; i < len(bl.Tx_hashes); i++ {
-		var tx transaction.Transaction
-		//var sc_args rpc.Arguments
-		//var sc_fees uint64
-		//var sender string
-
-		var inputparam rpc.GetTransaction_Params
-		var output rpc.GetTransaction_Result
-
-		inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
-
-		if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-			log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
-			//return err
-			//continue
-			//wg.Done()
+	for k, v := range getSCResults.VariableStringKeys {
+		currVar := &structures.SCIDVariable{}
+		if k == "C" {
+			continue
 		}
+		currVar.Key = k
+		switch cval := v.(type) {
+		case uint64:
+			currVar.Value = cval
+		case string:
+			// hex decode since all strings are hex encoded
+			dstr, _ := hex.DecodeString(cval)
+			p := new(crypto.Point)
+			if err := p.DecodeCompressed(dstr); err == nil {
 
-		tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
-		tx.Deserialize(tx_bin)
-
-		// TODO: Add count for registration TXs and store the following on normal txs: IF SCID IS PRESENT, store tx details + ring members + fees + etc. Use later for scid balance queries
-		if tx.TransactionType == transaction.SC_TX {
-			//sc_args = tx.SCDATA
-			//sc_fees = tx.Fees()
-			log.Printf("TX: %v", len(tx.Payloads))
+				addr := rpc.NewAddressFromKeys(p)
+				currVar.Value = addr.String()
+			} else {
+				currVar.Value = string(dstr)
+			}
+		default:
+			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
+			str := fmt.Sprintf("%v", cval)
+			currVar.Value = str
 		}
+		variables = append(variables, currVar)
+		//return
+	}
+
+	for k, v := range getSCResults.VariableUint64Keys {
+		currVar := &structures.SCIDVariable{}
+		currVar.Key = k
+		switch cval := v.(type) {
+		case string:
+			// hex decode since all strings are hex encoded
+			decd, _ := hex.DecodeString(cval)
+			p := new(crypto.Point)
+			if err := p.DecodeCompressed(decd); err == nil {
+
+				addr := rpc.NewAddressFromKeys(p)
+				currVar.Value = addr.String()
+			} else {
+				currVar.Value = string(decd)
+			}
+		case uint64:
+			currVar.Value = cval
+		default:
+			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
+			str := fmt.Sprintf("%v", cval)
+			currVar.Value = str
+		}
+		variables = append(variables, currVar)
+		//return
 	}
 
 	/*

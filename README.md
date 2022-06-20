@@ -49,8 +49,11 @@ runmode := "daemon"
 // NOTE - This REQUIRES the same directory as your  DERODB etc. I'd suggest checking out binary implementation of this and adjust accordingly, most likely not used through packaging (but could be)
 mbl := false
 
+// closeondisconnect - More of a 'specific' use case feature - if daemon connectivity (after previously being connected) ceases for x time, then close the indexer which eventually panics. Will be cleaner in future or removed with upstream daemons being pooled. Primary use case is to ensure api is disconnected when daemon is not connected for bad data, could accomplish other ways.
+closeondisconnect := false
+
 // Indexer
-defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl)
+defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect)
 ```
 
 ## Reading From Graviton DB(s)

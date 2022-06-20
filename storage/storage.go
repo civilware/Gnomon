@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"time"
 
@@ -624,6 +625,27 @@ func (g *GravitonStore) GetSCIDInteractionHeight(scid string) []int64 {
 	}
 
 	return nil
+}
+
+func (g *GravitonStore) GetInteractionIndex(topoheight int64, heights []int64) (height int64) {
+	// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+	sort.SliceStable(heights, func(i, j int) bool {
+		return heights[i] > heights[j]
+	})
+
+	if topoheight > heights[0] {
+		return heights[0]
+	}
+
+	for i := 1; i < len(heights); i++ {
+		if heights[i] < topoheight {
+			return heights[i]
+		} else if heights[i] == topoheight {
+			return heights[i]
+		}
+	}
+
+	return height
 }
 
 // Stores any SCIDs that were attempted to be deployed but not correct - log scid/fees burnt attempting it.

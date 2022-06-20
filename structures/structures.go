@@ -54,8 +54,8 @@ type APIConfig struct {
 }
 
 type SCIDVariable struct {
-	Key   string
-	Value string
+	Key   interface{}
+	Value interface{}
 }
 
 type SCIDInteractionHeight struct {

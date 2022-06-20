@@ -243,9 +243,6 @@ func (indexer *Indexer) StartDaemonMode() {
 			indexer.LastIndexedHeight++
 		}
 	}()
-
-	// Hold
-	//select {}
 }
 
 func (indexer *Indexer) StartWalletMode(runType string) {
@@ -864,15 +861,55 @@ func (client *Client) getSCVariables(scid string, topoheight int64) []*structure
 
 	for k, v := range getSCResults.VariableStringKeys {
 		currVar := &structures.SCIDVariable{}
+		// We don't currently need to store "C" through these means.
+		if k == "C" {
+			continue
+		}
 		currVar.Key = k
 		switch cval := v.(type) {
-		case string:
+		case uint64:
 			currVar.Value = cval
+		case string:
+			// hex decode since all strings are hex encoded
+			dstr, _ := hex.DecodeString(cval)
+			p := new(crypto.Point)
+			if err := p.DecodeCompressed(dstr); err == nil {
+
+				addr := rpc.NewAddressFromKeys(p)
+				currVar.Value = addr.String()
+			} else {
+				currVar.Value = string(dstr)
+			}
 		default:
+			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
 			str := fmt.Sprintf("%v", cval)
 			currVar.Value = str
 		}
-		//currVar.Value = v.(string)
+		variables = append(variables, currVar)
+	}
+
+	for k, v := range getSCResults.VariableUint64Keys {
+		currVar := &structures.SCIDVariable{}
+		currVar.Key = k
+		switch cval := v.(type) {
+		case string:
+			// hex decode since all strings are hex encoded
+			decd, _ := hex.DecodeString(cval)
+			p := new(crypto.Point)
+			if err := p.DecodeCompressed(decd); err == nil {
+
+				addr := rpc.NewAddressFromKeys(p)
+				currVar.Value = addr.String()
+			} else {
+				currVar.Value = string(decd)
+			}
+		case uint64:
+			currVar.Value = cval
+		default:
+			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
+			str := fmt.Sprintf("%v", cval)
+			currVar.Value = str
+		}
 		variables = append(variables, currVar)
 	}
 

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -308,8 +307,9 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
 
-		interactionHeight := apiServer.getInteractionIndex(topoheight, scidInteractionHeights)
+		interactionHeight := apiServer.Backend.GetInteractionIndex(topoheight, scidInteractionHeights)
 
+		// TODO: If there's no interaction height, do we go get scvars against daemon and store?
 		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
 
 		reply["variables"] = variables
@@ -408,27 +408,6 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	if err != nil {
 		log.Printf("[API] Error serializing API response: %v\n", err)
 	}
-}
-
-func (apiServer *ApiServer) getInteractionIndex(topoheight int64, heights []int64) (height int64) {
-	// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
-	sort.SliceStable(heights, func(i, j int) bool {
-		return heights[i] > heights[j]
-	})
-
-	if topoheight > heights[0] {
-		return heights[0]
-	}
-
-	for i := 1; i < len(heights); i++ {
-		if heights[i] < topoheight {
-			return heights[i]
-		} else if heights[i] == topoheight {
-			return heights[i]
-		}
-	}
-
-	return height
 }
 
 func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http.Request) {
