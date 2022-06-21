@@ -148,8 +148,8 @@ func (indexer *Indexer) StartDaemonMode() {
 			blid, err := indexer.RPC.getBlockHash(uint64(indexer.LastIndexedHeight))
 			if err != nil {
 				// Handle pruned nodes index errors... find height that they have blocks able to be indexed
-				log.Printf("Checking if strings contain: %v", err.Error())
-				if strings.Contains(err.Error(), "GetBlockHeaderByTopoHeight failed") {
+				//log.Printf("Checking if strings contain: %v", err.Error())
+				if strings.Contains(err.Error(), "err occured empty block") {
 					currIndex := indexer.LastIndexedHeight
 					rewindIndex := int64(0)
 					blockJump := int64(10000)
@@ -169,7 +169,7 @@ func (indexer *Indexer) StartDaemonMode() {
 						}
 						_, err = indexer.RPC.getBlockHash(uint64(currIndex))
 						if err != nil {
-							//if strings.Contains(err.Error(), "GetBlockHeaderByTopoHeight failed") {
+							//if strings.Contains(err.Error(), "err occured empty block") {
 							//time.Sleep(200 * time.Millisecond)	// sleep for node spam, not *required* but can be useful for lesser nodes in brief catchup time.
 							// Increase block by 10 to not spam the daemon at every single block, but skip along a little bit to move faster/more less impact to node. This can be modified if required.
 							if (currIndex + blockJump) > indexer.ChainHeight {
@@ -292,6 +292,48 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 
 	// Hold
 	select {}
+}
+
+// Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
+func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
+	for _, v := range scid {
+		// Check if already validated
+		if scidExist(validated_scs, v) {
+			log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", v)
+			continue
+		} else {
+			// Validate SCID is *actually* a valid SCID
+			scVars := indexer.RPC.getSCVariables(v, indexer.ChainHeight)
+
+			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
+			if len(scVars) > 0 {
+				validated_scs = append(validated_scs, v)
+				writeWait, _ := time.ParseDuration("50ms")
+				for indexer.Backend.Writing == 1 {
+					//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+					time.Sleep(writeWait)
+				}
+				indexer.Backend.Writing = 1
+				err = indexer.Backend.StoreOwner(v, "")
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
+				}
+				err = indexer.Backend.StoreSCIDVariableDetails(v, scVars, indexer.ChainHeight)
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
+				}
+				err = indexer.Backend.StoreSCIDInteractionHeight(v, indexer.ChainHeight)
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+				}
+				indexer.Backend.Writing = 0
+			} else {
+				log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v, indexer.ChainHeight)
+			}
+		}
+	}
+
+	return err
 }
 
 func (client *Client) Connect(endpoint string) (err error) {
@@ -627,7 +669,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						}
 
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
-						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "installsc", topoheight)
+						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.Writing = 0
 
 						log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
@@ -694,7 +736,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						// Gets the SC variables (key/value) at a given topoheight and then stores them
 						scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
-						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, "scinvoke", topoheight)
+						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.Writing = 0
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
@@ -732,7 +774,7 @@ func (client *Client) getBlockHash(height uint64) (hash string, err error) {
 	var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: height}
 
 	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
-		log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v\n", err)
+		//log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v\n", err)
 		return hash, fmt.Errorf("GetBlockHeaderByTopoHeight failed: %v\n", err)
 	} else {
 		//log.Printf("[getBlockHash] Retrieved block header from topoheight %v\n", height)
@@ -923,6 +965,9 @@ func (ind *Indexer) Close() {
 
 	// Sleep for safety
 	time.Sleep(time.Second * 5)
+
+	// Close websocket connection cleanly
+	ind.RPC.WS.Close()
 
 	// Close out grav db cleanly
 	ind.Backend.DB.Close()

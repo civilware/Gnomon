@@ -322,6 +322,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			command = strings.ToLower(line_parts[0])
 		}
 
+		// TODO: CLI commands may not necessarily always need to print from every indexer, could produce multiple results. Issues? Maybe modify in future.
 		switch {
 		case line == "help":
 			usage(l.Stderr())
@@ -400,6 +401,48 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				log.Printf("listsc_byscid needs a single scid as argument\n")
 			}
+		case command == "listscidkey_byvalue":
+			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count int64
+					for k, v := range sclist {
+						if k == line_parts[1] {
+							log.Printf("SCID: %v ; Owner: %v\n", k, v)
+							keysstringbyvalue, keysuint64byvalue := vi.Backend.GetSCIDKeysByValue(k, line_parts[2], vi.ChainHeight)
+							for _, skey := range keysstringbyvalue {
+								log.Printf("%v\n", skey)
+							}
+							for _, ukey := range keysuint64byvalue {
+								log.Printf("%v\n", ukey)
+							}
+							count++
+						}
+					}
+
+					if count == 0 {
+						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					}
+				}
+			} else {
+				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
+		case command == "addscid_toindex":
+			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
+			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					var scl []string
+					scl = append(scl, line_parts[1])
+					err = vi.AddSCIDToIndex(scl)
+					if err != nil {
+						log.Printf("Err - %v", err)
+					}
+				}
+			} else {
+				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
 		case command == "pop":
 			switch len(line_parts) {
 			case 1:
@@ -461,6 +504,8 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
+	io.WriteString(w, "\t\033[1mlistscidkey_byvalue\033[0m\tList keys in a SC that match a given value, listscidkey_byvalue <scid> <value>\n")
+	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
 	//io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
