@@ -476,6 +476,15 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			default:
 				log.Printf("POP needs argument n to pop this many blocks from the top")
 			}
+		case line == "status":
+			for ki, vi := range g.Indexers {
+				log.Printf("- Indexer '%v'", ki)
+				validatedSCIDs := vi.Backend.GetAllOwnersAndSCIDs()
+				gnomon_count := int64(len(validatedSCIDs))
+				currheight := vi.LastIndexedHeight - 1
+
+				log.Printf("GNOMON [%d/%d] R:%d >>", currheight, vi.ChainHeight, gnomon_count)
+			}
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
 			g.Close()
@@ -506,7 +515,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvalue\033[0m\tList keys in a SC that match a given value, listscidkey_byvalue <scid> <value>\n")
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
-	//io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
+	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
 	io.WriteString(w, "\t\033[1mexit\033[0m\t\tQuit the daemon\n")

@@ -39,12 +39,13 @@ type Indexer struct {
 	Endpoint          string
 	RunMode           string
 	MBLLookup         bool
+	ValidatedSCs      []string
 	CloseOnDisconnect bool
 }
 
 var daemon_endpoint string
 var Connected bool = false
-var validated_scs []string
+
 var chain_topoheight int64
 
 func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool) *Indexer {
@@ -101,7 +102,7 @@ func (indexer *Indexer) StartDaemonMode() {
 	}
 
 	if contains {
-		validated_scs = append(validated_scs, "0000000000000000000000000000000000000000000000000000000000000001")
+		indexer.ValidatedSCs = append(indexer.ValidatedSCs, "0000000000000000000000000000000000000000000000000000000000000001")
 		writeWait, _ := time.ParseDuration("50ms")
 		for indexer.Backend.Writing == 1 {
 			//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
@@ -128,7 +129,7 @@ func (indexer *Indexer) StartDaemonMode() {
 			log.Printf("[Main] Appending pre-validated SCIDs from store to memory.\n")
 
 			for k := range pre_validatedSCIDs {
-				validated_scs = append(validated_scs, k)
+				indexer.ValidatedSCs = append(indexer.ValidatedSCs, k)
 			}
 		}
 	}
@@ -223,7 +224,7 @@ func (indexer *Indexer) StartDaemonMode() {
 				continue
 			}
 
-			err = indexer.RPC.indexBlock(blid, indexer.LastIndexedHeight, indexer.SearchFilter, indexer.MBLLookup, indexer.Backend)
+			err = indexer.indexBlock(blid, indexer.LastIndexedHeight, indexer.SearchFilter, indexer.MBLLookup, indexer.Backend)
 			if err != nil {
 				log.Printf("[mainFOR] ERROR - %v\n", err)
 				time.Sleep(time.Second)
@@ -298,7 +299,7 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
 	for _, v := range scid {
 		// Check if already validated
-		if scidExist(validated_scs, v) {
+		if scidExist(indexer.ValidatedSCs, v) {
 			log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", v)
 			continue
 		} else {
@@ -307,7 +308,7 @@ func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
 
 			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 			if len(scVars) > 0 {
-				validated_scs = append(validated_scs, v)
+				indexer.ValidatedSCs = append(indexer.ValidatedSCs, v)
 				writeWait, _ := time.ParseDuration("50ms")
 				for indexer.Backend.Writing == 1 {
 					//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
@@ -362,11 +363,11 @@ func (client *Client) Connect(endpoint string) (err error) {
 	return err
 }
 
-func (client *Client) indexBlock(blid string, topoheight int64, search_filter string, mbl bool, Graviton_backend *storage.GravitonStore) (err error) {
+func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter string, mbl bool, Graviton_backend *storage.GravitonStore) (err error) {
 	var io rpc.GetBlock_Result
 	var ip = rpc.GetBlock_Params{Hash: blid}
 
-	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
+	if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
 		return fmt.Errorf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
 	}
 
@@ -418,7 +419,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 
 			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, bl.Tx_hashes[i].String())
 
-			if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
+			if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
 				//log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
 				//return err
 				//continue
@@ -643,12 +644,12 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					log.Printf("SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
-					scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
+					scVars := indexer.RPC.getSCVariables(bl_sctxs[i].Scid, topoheight)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
 						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
-						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
+						indexer.ValidatedSCs = append(indexer.ValidatedSCs, bl_sctxs[i].Scid)
 
 						writeWait, _ := time.ParseDuration("50ms")
 						for Graviton_backend.Writing == 1 {
@@ -686,15 +687,15 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					}
 				}
 			} else {
-				if !scidExist(validated_scs, bl_sctxs[i].Scid) {
+				if !scidExist(indexer.ValidatedSCs, bl_sctxs[i].Scid) {
 
 					// Validate SCID is *actually* a valid SCID
-					valVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
+					valVars := indexer.RPC.getSCVariables(bl_sctxs[i].Scid, topoheight)
 
 					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 					if len(valVars) > 0 {
 						log.Printf("SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, "")
-						validated_scs = append(validated_scs, bl_sctxs[i].Scid)
+						indexer.ValidatedSCs = append(indexer.ValidatedSCs, bl_sctxs[i].Scid)
 
 						writeWait, _ := time.ParseDuration("50ms")
 						for Graviton_backend.Writing == 1 {
@@ -710,7 +711,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 					}
 				}
 
-				if scidExist(validated_scs, bl_sctxs[i].Scid) {
+				if scidExist(indexer.ValidatedSCs, bl_sctxs[i].Scid) {
 					//log.Printf("SCID %v is validated, checking the SC TX entrypoints to see if they should be logged.\n", bl_sctxs[i].Scid)
 					// TODO: Modify this to be either all entrypoints, just Start, or a subset that is defined in pre-run params or not needed?
 					//if bl_sctxs[i].entrypoint == "Start" {
@@ -734,7 +735,7 @@ func (client *Client) indexBlock(blid string, topoheight int64, search_filter st
 						}
 
 						// Gets the SC variables (key/value) at a given topoheight and then stores them
-						scVars := client.getSCVariables(bl_sctxs[i].Scid, topoheight)
+						scVars := indexer.RPC.getSCVariables(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.Writing = 0
