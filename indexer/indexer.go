@@ -85,37 +85,6 @@ func (indexer *Indexer) StartDaemonMode() {
 	go indexer.getInfo()
 	time.Sleep(1 * time.Second)
 
-	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
-	var getSCResults rpc.GetSC_Result
-	getSCParams := rpc.GetSC_Params{SCID: "0000000000000000000000000000000000000000000000000000000000000001", Code: true, Variables: false, TopoHeight: indexer.LastIndexedHeight}
-	if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-		//log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
-	}
-
-	var contains bool
-
-	// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-	if indexer.SearchFilter == "" && err != nil {
-		contains = true
-	} else {
-		contains = strings.Contains(getSCResults.Code, indexer.SearchFilter)
-	}
-
-	if contains {
-		indexer.ValidatedSCs = append(indexer.ValidatedSCs, "0000000000000000000000000000000000000000000000000000000000000001")
-		writeWait, _ := time.ParseDuration("50ms")
-		for indexer.Backend.Writing == 1 {
-			//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-			time.Sleep(writeWait)
-		}
-		indexer.Backend.Writing = 1
-		err = indexer.Backend.StoreOwner("0000000000000000000000000000000000000000000000000000000000000001", "")
-		if err != nil {
-			log.Printf("Error storing owner: %v\n", err)
-		}
-		indexer.Backend.Writing = 0
-	}
-
 	storedindex := indexer.Backend.GetLastIndexHeight()
 	if storedindex > indexer.LastIndexedHeight {
 		log.Printf("[Main] Continuing from last indexed height %v\n", storedindex)
@@ -131,6 +100,55 @@ func (indexer *Indexer) StartDaemonMode() {
 			for k := range pre_validatedSCIDs {
 				indexer.ValidatedSCs = append(indexer.ValidatedSCs, k)
 			}
+		}
+	}
+
+	// TODO: Dynamically get SCIDs of hardcoded SCs and append them if search filter is ""
+	var hardcodedscids []string
+	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
+
+	for _, vi := range hardcodedscids {
+		if scidExist(indexer.ValidatedSCs, vi) {
+			// Hardcoded SCID already exists, no need to re-add
+			continue
+		}
+		var getSCResults rpc.GetSC_Result
+		getSCParams := rpc.GetSC_Params{SCID: vi, Code: true, Variables: false, TopoHeight: indexer.LastIndexedHeight}
+		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+			//log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
+		}
+
+		var contains bool
+
+		// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+		if indexer.SearchFilter == "" && err != nil {
+			contains = true
+		} else {
+			contains = strings.Contains(getSCResults.Code, indexer.SearchFilter)
+		}
+
+		if contains {
+			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
+			writeWait, _ := time.ParseDuration("50ms")
+			for indexer.Backend.Writing == 1 {
+				//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+			indexer.Backend.Writing = 1
+			err = indexer.Backend.StoreOwner(vi, "")
+			if err != nil {
+				log.Printf("Error storing owner: %v\n", err)
+			}
+			scVars := indexer.RPC.getSCVariables(vi, indexer.ChainHeight)
+			err = indexer.Backend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight)
+			if err != nil {
+				log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
+			}
+			err = indexer.Backend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight)
+			if err != nil {
+				log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+			}
+			indexer.Backend.Writing = 0
 		}
 	}
 
@@ -673,7 +691,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
 						Graviton_backend.Writing = 0
 
-						log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
+						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
 					} else {
 						log.Printf("SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("50ms")
