@@ -907,4 +907,33 @@ func (g *GravitonStore) GetMiniblockCountByAddress(addr string) int64 {
 	return int64(0)
 }
 
+// Gets all SCID interacts from a given address - non-builtin/name scids.
+func (g *GravitonStore) GetSCIDInteractionByAddr(addr string) (scids []string) {
+	normTxsWithSCID := g.GetAllNormalTxWithSCIDByAddr(addr)
+
+	// Append scids list of normtxs scid interaction
+	for _, v := range normTxsWithSCID {
+		if !idExist(scids, v.Scid) {
+			scids = append(scids, v.Scid)
+		}
+	}
+
+	allSCIDs := g.GetAllOwnersAndSCIDs()
+	for k, _ := range allSCIDs {
+		// Skip builtin name registration, no need to waste cursor time on this one since it's not pertinent to goal of function
+		// TODO: Future state, we'll have much more SCID interaction and this will get slower and slower, will need to speedup. Probably will happen with data re-org in future
+		if k == "0000000000000000000000000000000000000000000000000000000000000001" {
+			continue
+		}
+		invokedetails := g.GetAllSCIDInvokeDetailsBySigner(k, addr)
+		if len(invokedetails) > 0 {
+			if !idExist(scids, k) {
+				scids = append(scids, k)
+			}
+		}
+	}
+
+	return scids
+}
+
 // ---- End Application Graviton/Backend functions ---- //

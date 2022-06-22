@@ -441,7 +441,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 				}
 			} else {
-				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+				log.Printf("addscid_toindex needs 1 values: single scid to match as arguments\n")
+			}
+		case command == "getscidlist_byaddr":
+			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
+			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					scidinteracts := vi.Backend.GetSCIDInteractionByAddr(line_parts[1])
+					for _, v := range scidinteracts {
+						log.Printf("%v\n", v)
+					}
+				}
+			} else {
+				log.Printf("getscidlist_byaddr needs 1 values: single address to match as arguments\n")
 			}
 		case command == "pop":
 			switch len(line_parts) {
@@ -515,6 +528,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvalue\033[0m\tList keys in a SC that match a given value, listscidkey_byvalue <scid> <value>\n")
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
+	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
