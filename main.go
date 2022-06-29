@@ -49,7 +49,8 @@ Options:
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
   --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
-  --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.`
+  --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
+  --fastsync	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.`
 
 var Exit_In_Progress = make(chan bool)
 
@@ -59,6 +60,7 @@ var api_ssl_endpoint string
 var get_info_ssl_endpoint string
 var sslenabled bool
 var closeondisconnect bool
+var fastsync bool
 var search_filter string
 var mbl bool
 var version = "0.1a"
@@ -163,6 +165,14 @@ func main() {
 		}
 	}
 
+	// Starts at current chainheight and retrieves a list of SCIDs to auto-add to index validation list
+	if arguments["--fastsync"] != nil {
+		fastsyncstr := arguments["--fastsync"].(string)
+		if fastsyncstr == "true" {
+			fastsync = true
+		}
+	}
+
 	// Database
 	var shasum string
 	if search_filter == "" {
@@ -192,7 +202,7 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -349,7 +359,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect)
+				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
 				go nIndexer.StartDaemonMode()
 				g.Indexers[nsf] = nIndexer
 			}
@@ -497,6 +507,19 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				currheight := vi.LastIndexedHeight - 1
 
 				log.Printf("GNOMON [%d/%d] R:%d >>", currheight, vi.ChainHeight, gnomon_count)
+			}
+		case line == "change":
+			for ki, vi := range g.Indexers {
+				log.Printf("- Indexer '%v'", ki)
+				log.Printf("Old endpoint - %v", vi.Endpoint)
+				vi.Lock()
+				if vi.Endpoint == "127.0.0.1:10102" {
+					vi.Endpoint = "104.46.106.130:10102"
+				} else {
+					vi.Endpoint = "127.0.0.1:10102"
+				}
+				log.Printf("New endpoint - %v", vi.Endpoint)
+				vi.Unlock()
 			}
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")

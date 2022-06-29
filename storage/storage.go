@@ -25,7 +25,7 @@ type GravitonStore struct {
 	Writing       int
 }
 
-// TODO/NOTE: Lots of optimization/modifications are to be had hre. Commit handling, tree structures, folder structure etc to reduce disk usage. It's higher now than will be in future
+// TODO/NOTE: Lots of optimization/modifications are to be had here. Commit handling, tree structures, folder structure etc to reduce disk usage. It's higher now than will be in future
 
 // ---- Application Graviton/Backend functions ---- //
 // Builds new Graviton DB based on input from main()
