@@ -508,19 +508,21 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				log.Printf("GNOMON [%d/%d] R:%d >>", currheight, vi.ChainHeight, gnomon_count)
 			}
-		case line == "change":
-			for ki, vi := range g.Indexers {
-				log.Printf("- Indexer '%v'", ki)
-				log.Printf("Old endpoint - %v", vi.Endpoint)
-				vi.Lock()
-				if vi.Endpoint == "127.0.0.1:10102" {
-					vi.Endpoint = "104.46.106.130:10102"
-				} else {
-					vi.Endpoint = "127.0.0.1:10102"
-				}
-				log.Printf("New endpoint - %v", vi.Endpoint)
-				vi.Unlock()
-			}
+			/*
+				case line == "change":
+					for ki, vi := range g.Indexers {
+						log.Printf("- Indexer '%v'", ki)
+						log.Printf("Old endpoint - %v", vi.Endpoint)
+						vi.Lock()
+						if vi.Endpoint == "127.0.0.1:10102" {
+							vi.Endpoint = "127.0.0.1:40402"
+						} else {
+							vi.Endpoint = "127.0.0.1:10102"
+						}
+						log.Printf("New endpoint - %v", vi.Endpoint)
+						vi.Unlock()
+					}
+			*/
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
 			g.Close()

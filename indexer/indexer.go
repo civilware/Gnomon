@@ -52,12 +52,17 @@ const gnomon_scid = ""
 // Defines the number of blocks to jump when testing pruned nodes.
 const block_jump = int64(10000)
 
+// String set of hardcoded scids which are appended to in NewIndexer. These are used for reference points such as ignoring invoke calls for indexer.Fastsync == true among other procedures.
+var hardcodedscids []string
+
 var daemon_endpoint string
 var Connected bool = false
 
 var chain_topoheight int64
 
 func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool) *Indexer {
+	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
+
 	return &Indexer{
 		LastIndexedHeight: last_indexedheight,
 		SearchFilter:      search_filter,
@@ -100,7 +105,7 @@ func (indexer *Indexer) StartDaemonMode() {
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
 	if storedindex == 0 && indexer.Fastsync {
 		log.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
-		storedindex = indexer.ChainHeight
+		storedindex = int64(570000) //indexer.ChainHeight
 	}
 
 	if storedindex > indexer.LastIndexedHeight {
@@ -136,22 +141,11 @@ func (indexer *Indexer) StartDaemonMode() {
 		*/
 	}
 
-	// TODO: This portion may be replaced by gnomon SC reference once deployed
-	var hardcodedscids []string
-	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
-
 	for _, vi := range hardcodedscids {
 		if scidExist(indexer.ValidatedSCs, vi) {
 			// Hardcoded SCID already exists, no need to re-add
 			continue
 		}
-		/*
-			var getSCResults rpc.GetSC_Result
-			getSCParams := rpc.GetSC_Params{SCID: vi, Code: true, Variables: false, TopoHeight: indexer.LastIndexedHeight}
-			if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-				//log.Printf("[GetSCVariables] ERROR - GetSCVariables failed: %v\n", err)
-			}
-		*/
 
 		scVars, scCode, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight)
 
@@ -602,7 +596,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 	//blheight := int64(bl.Height)
 	//normTxCount = int64(len(bl.Tx_hashes))
 
-	if regTxCount > 0 {
+	if regTxCount > 0 && !indexer.Fastsync {
 		// Load from mem existing regTxCount and append new value
 		currRegTxCount := Graviton_backend.GetTxCount("registration")
 		writeWait, _ := time.ParseDuration("50ms")
@@ -618,7 +612,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		}
 	}
 
-	if burnTxCount > 0 {
+	if burnTxCount > 0 && !indexer.Fastsync {
 		// Load from mem existing burnTxCount and append new value
 		currBurnTxCount := Graviton_backend.GetTxCount("burn")
 		writeWait, _ := time.ParseDuration("50ms")
@@ -634,7 +628,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		Graviton_backend.Writing = 0
 	}
 
-	if normTxCount > 0 {
+	if normTxCount > 0 && !indexer.Fastsync {
 		/*
 			// Test code for finding highest tps block
 			var io rpc.GetBlockHeaderByHeight_Result
@@ -709,7 +703,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		// Store all normal TXs that contained a SC transfer
 		if len(bl_normtxs) > 0 {
 			for i := 0; i < len(bl_normtxs); i++ {
-
+				// TODO: Edge cases? Can't recall requiring this bit.. to investigate.
 			}
 		}
 	}
@@ -823,11 +817,17 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 							time.Sleep(writeWait)
 						}
 						Graviton_backend.Writing = 1
-						err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
-						if err != nil {
-							log.Printf("[indexBlock] Err storing invoke details. Err: %v\n", err)
-							time.Sleep(5 * time.Second)
-							return err
+
+						// If a hardcodedscid invoke + fastsync is enabled, do not log the invoke details.
+						if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
+							log.Printf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+						} else {
+							err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
+							if err != nil {
+								log.Printf("[indexBlock] Err storing invoke details. Err: %v\n", err)
+								time.Sleep(5 * time.Second)
+								return err
+							}
 						}
 
 						// Gets the SC variables (key/value) at a given topoheight and then stores them
@@ -924,20 +924,38 @@ func (indexer *Indexer) getInfo() {
 
 		currStoreGetInfo := indexer.Backend.GetGetInfoDetails()
 		if currStoreGetInfo != nil {
-			if currStoreGetInfo.Height < info.Height {
-				var structureGetInfo *structures.GetInfo
-				structureGetInfo = info
-				writeWait, _ := time.ParseDuration("50ms")
-				for indexer.Backend.Writing == 1 {
-					//log.Printf("[Indexer-getInfo] GravitonDB is writing... sleeping for %v...", writeWait)
-					time.Sleep(writeWait)
+			// Ensure you are not connecting to testnet or mainnet unintentionally based on store getinfo history
+			if currStoreGetInfo.Testnet == info.Testnet {
+				if currStoreGetInfo.Height < info.Height {
+					var structureGetInfo *structures.GetInfo
+					structureGetInfo = info
+					writeWait, _ := time.ParseDuration("50ms")
+					for indexer.Backend.Writing == 1 {
+						//log.Printf("[Indexer-getInfo] GravitonDB is writing... sleeping for %v...", writeWait)
+						time.Sleep(writeWait)
+					}
+					indexer.Backend.Writing = 1
+					err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
+					if err != nil {
+						log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
+					}
+					indexer.Backend.Writing = 0
 				}
-				indexer.Backend.Writing = 1
-				err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
-				if err != nil {
-					log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
+			} else {
+				if indexer.RPC.WS != nil {
+					// Remote addr (current ws connection endpoint) does not match indexer endpoint - re-connecting
+					log.Printf("[getInfo] ERROR - Endpoint network (testnet - %v) is not the same as past stored network (testnet - %v)", info.Testnet, currStoreGetInfo.Testnet)
+					indexer.RPC.Lock()
+					indexer.RPC.WS.Close()
+					indexer.RPC.Unlock()
+
+					indexer.Lock()
+					indexer.ChainHeight = 0
+					indexer.Unlock()
+
+					time.Sleep(5 * time.Second)
+					continue
 				}
-				indexer.Backend.Writing = 0
 			}
 		} else {
 			var structureGetInfo *structures.GetInfo
