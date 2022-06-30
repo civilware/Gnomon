@@ -3,8 +3,10 @@ package indexer
 import (
 	"context"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"log"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/civilware/Gnomon/structures"
 
 	"github.com/deroproject/derohe/block"
+	"github.com/deroproject/derohe/cryptography/bn256"
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
@@ -1084,6 +1087,100 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 	return variables, code, getSCResults.Balances
 }
 
+// Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)
+func (indexer *Indexer) GetSCIDKeysByValue(scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64) {
+	variables, _, _ := indexer.RPC.GetSCVariables(scid, height)
+
+	// Switch against the value passed. If it's a uint64 or string
+	switch inpvar := val.(type) {
+	case uint64:
+		for _, v := range variables {
+			switch cval := v.Value.(type) {
+			case uint64:
+				if inpvar == cval {
+					switch ckey := v.Key.(type) {
+					case uint64:
+						keysuint64 = append(keysuint64, ckey)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						keysstring = append(keysstring, v.Key.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	case string:
+		for _, v := range variables {
+			switch cval := v.Value.(type) {
+			case string:
+				if inpvar == cval {
+					switch ckey := v.Key.(type) {
+					case uint64:
+						keysuint64 = append(keysuint64, ckey)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						keysstring = append(keysstring, v.Key.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	default:
+		// Nothing - expect only string/uint64 for value types
+	}
+
+	return keysstring, keysuint64
+}
+
+// Gets SC values by key at given topoheight who's key equates to a given interface{} (string/uint64)
+func (indexer *Indexer) GetSCIDValuesByKey(scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
+	variables, _, _ := indexer.RPC.GetSCVariables(scid, height)
+
+	// Switch against the value passed. If it's a uint64 or string
+	switch inpvar := key.(type) {
+	case uint64:
+		for _, v := range variables {
+			switch ckey := v.Key.(type) {
+			case uint64:
+				if inpvar == ckey {
+					switch cval := v.Value.(type) {
+					case uint64:
+						valuesuint64 = append(valuesuint64, cval)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						valuesstring = append(valuesstring, v.Value.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	case string:
+		for _, v := range variables {
+			switch ckey := v.Key.(type) {
+			case string:
+				if inpvar == ckey {
+					switch cval := v.Value.(type) {
+					case uint64:
+						valuesuint64 = append(valuesuint64, cval)
+					default:
+						// default just store as string. Values should only ever be strings or uint64, however, but assume default to string
+						valuesstring = append(valuesstring, v.Value.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	default:
+		// Nothing - expect only string/uint64 for value types
+	}
+
+	return valuesstring, valuesuint64
+}
+
 // Converts returned SCIDVariables KEY values who's values equates to a given interface{} (string/uint64)
 func (indexer *Indexer) ConvertSCIDKeys(variables []*structures.SCIDVariable) (keysstring []string, keysuint64 []uint64) {
 	for _, v := range variables {
@@ -1100,7 +1197,7 @@ func (indexer *Indexer) ConvertSCIDKeys(variables []*structures.SCIDVariable) (k
 }
 
 // Converts returned SCIDVariables VALUE values who's values equates to a given interface{} (string/uint64)
-func (indexer *Indexer) ConvertSCIDValues(variables []*structures.SCIDVariable) (valuesstring []string, valuesuint64 []uint64) {
+func (indexer *Indexer) ConvertSCIDValules(variables []*structures.SCIDVariable) (valuesstring []string, valuesuint64 []uint64) {
 	for _, v := range variables {
 		switch cval := v.Value.(type) {
 		case uint64:
@@ -1112,6 +1209,66 @@ func (indexer *Indexer) ConvertSCIDValues(variables []*structures.SCIDVariable) 
 	}
 
 	return valuesstring, valuesuint64
+}
+
+// Validates that a stored signature results in the code deployed to a SC - currently allowing any 'key' to be passed through, however intended key is 'signature' or similar
+func (indexer *Indexer) ValidateSCSignature(scid string, key string, height int64) (validated bool, signer string) {
+	// TODO: two rpc calls to getsc at the moment, maybe fix above functions to pass/use other methods or returns (say scidvalues or scidkeys could also return code/balance etc.)
+	_, code, _ := indexer.RPC.GetSCVariables(scid, height)
+
+	keysstring, _ := indexer.GetSCIDValuesByKey(scid, key, height)
+
+	if keysstring[0] == "" {
+		return
+	}
+
+	// CheckSignature
+	filedata := []byte(keysstring[0])
+	p, _ := pem.Decode(filedata)
+	if p == nil {
+		log.Printf("[ValidateSCSignature] ERR - Unknown format of input data - %v", keysstring[0])
+		return
+	}
+
+	astr := p.Headers["Address"]
+	cstr := p.Headers["C"]
+	sstr := p.Headers["S"]
+
+	addr, err := rpc.NewAddress(astr)
+	if err != nil {
+		log.Printf("[ValidateSCSignature] ERR - Cannot validate Address header")
+		return
+	}
+
+	c, ok := new(big.Int).SetString(cstr, 16)
+	if !ok {
+		err = fmt.Errorf("Unknown C format")
+		return
+	}
+
+	s, ok := new(big.Int).SetString(sstr, 16)
+	if !ok {
+		err = fmt.Errorf("Unknown S format")
+		return
+	}
+
+	tmppoint := new(bn256.G1).Add(new(bn256.G1).ScalarMult(crypto.G, s), new(bn256.G1).ScalarMult(addr.PublicKey.G1(), new(big.Int).Neg(c)))
+	serialize := []byte(fmt.Sprintf("%s%s%x", addr.PublicKey.G1().String(), tmppoint.String(), p.Bytes))
+
+	c_calculated := crypto.ReducedHash(serialize)
+	if c.String() != c_calculated.String() {
+		err = fmt.Errorf("signature mismatch")
+		return
+	}
+
+	signer = addr.String()
+	message := p.Bytes
+
+	if string(message) == code {
+		validated = true
+	}
+
+	return
 }
 
 // Close cleanly the indexer

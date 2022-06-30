@@ -411,7 +411,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				log.Printf("listsc_byscid needs a single scid as argument\n")
 			}
-		case command == "listscidkey_byvalue":
+		case command == "listscidkey_byvaluestored":
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
@@ -437,6 +437,78 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				}
 			} else {
 				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
+		case command == "listscidkey_byvaluelive":
+			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					keysstringbyvalue, keysuint64byvalue := vi.GetSCIDKeysByValue(line_parts[1], line_parts[2], vi.ChainHeight)
+					for _, skey := range keysstringbyvalue {
+						log.Printf("%v\n", skey)
+					}
+					for _, ukey := range keysuint64byvalue {
+						log.Printf("%v\n", ukey)
+					}
+					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
+					break
+				}
+			} else {
+				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
+		case command == "listscidvalue_bykeystored":
+			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count int64
+					for k, v := range sclist {
+						if k == line_parts[1] {
+							log.Printf("SCID: %v ; Owner: %v\n", k, v)
+							valuesstringbykey, valuesuint64bykey := vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight)
+							for _, sval := range valuesstringbykey {
+								log.Printf("%v\n", sval)
+							}
+							for _, uval := range valuesuint64bykey {
+								log.Printf("%v\n", uval)
+							}
+							count++
+						}
+					}
+
+					if count == 0 {
+						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					}
+				}
+			} else {
+				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
+		case command == "listscidvalue_bykeylive":
+			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					valuesstringbykey, valuesuint64bykey := vi.GetSCIDValuesByKey(line_parts[1], line_parts[2], vi.ChainHeight)
+					for _, sval := range valuesstringbykey {
+						log.Printf("%v\n", sval)
+					}
+					for _, uval := range valuesuint64bykey {
+						log.Printf("%v\n", uval)
+					}
+					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
+					break
+				}
+			} else {
+				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
+			}
+		case command == "validatesc":
+			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					validated, signer := vi.ValidateSCSignature(line_parts[1], "signature", vi.ChainHeight)
+					log.Printf("Validated: %v", validated)
+					log.Printf("Signer: %v", signer)
+					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
+					break
+				}
 			}
 		case command == "addscid_toindex":
 			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
@@ -551,7 +623,11 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
-	io.WriteString(w, "\t\033[1mlistscidkey_byvalue\033[0m\tList keys in a SC that match a given value, listscidkey_byvalue <scid> <value>\n")
+	io.WriteString(w, "\t\033[1mlistscidkey_byvaluestored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>\n")
+	io.WriteString(w, "\t\033[1mlistscidkey_byvaluelive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>\n")
+	io.WriteString(w, "\t\033[1mlistscidvalue_bykeystored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidvalue_bykeystored <scid> <key>\n")
+	io.WriteString(w, "\t\033[1mlistscidvalue_bykeylive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidvalue_bykeylive <scid> <key>\n")
+	io.WriteString(w, "\t\033[1mvalidatesc\033[0m\tValidates a SC looking for a 'signature' k/v pair containing DERO signature validating the code matches the signature, validatesc <scid>\n")
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")

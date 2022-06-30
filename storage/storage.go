@@ -607,6 +607,58 @@ func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height 
 	return keysstring, keysuint64
 }
 
+// Gets SC values by key at given topoheight who's key equates to a given interface{} (string/uint64)
+func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
+	scidInteractionHeights := g.GetSCIDInteractionHeight(scid)
+
+	interactionHeight := g.GetInteractionIndex(height, scidInteractionHeights)
+
+	// TODO: If there's no interaction height, do we go get scvars against daemon and store? Or do we just ignore and return nil
+	variables := g.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+
+	// Switch against the value passed. If it's a uint64 or string
+	switch inpvar := key.(type) {
+	case uint64:
+		for _, v := range variables {
+			switch ckey := v.Key.(type) {
+			case uint64:
+				if inpvar == ckey {
+					switch cval := v.Value.(type) {
+					case uint64:
+						valuesuint64 = append(valuesuint64, cval)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						valuesstring = append(valuesstring, v.Value.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	case string:
+		for _, v := range variables {
+			switch ckey := v.Key.(type) {
+			case string:
+				if inpvar == ckey {
+					switch cval := v.Value.(type) {
+					case uint64:
+						valuesuint64 = append(valuesuint64, cval)
+					default:
+						// default just store as string. Values should only ever be strings or uint64, however, but assume default to string
+						valuesstring = append(valuesstring, v.Value.(string))
+					}
+				}
+			default:
+				// Nothing - expect only string/uint64 for value types
+			}
+		}
+	default:
+		// Nothing - expect only string/uint64 for value types
+	}
+
+	return valuesstring, valuesuint64
+}
+
 // Stores SC interaction height and detail - height invoked upon and type (scinstall/scinvoke). This is separate tree & k/v since we can query it for other things at less data retrieval
 func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, height int64) error {
 	store := g.DB
