@@ -307,7 +307,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
 
-		interactionHeight := apiServer.Backend.GetInteractionIndex(topoheight, scidInteractionHeights)
+		interactionHeight := apiServer.Backend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
 
 		// TODO: If there's no interaction height, do we go get scvars against daemon and store?
 		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)

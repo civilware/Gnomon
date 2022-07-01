@@ -108,7 +108,7 @@ func (indexer *Indexer) StartDaemonMode() {
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
 	if storedindex == 0 && indexer.Fastsync {
 		log.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
-		storedindex = int64(570000) //indexer.ChainHeight
+		storedindex = indexer.ChainHeight
 	}
 
 	if storedindex > indexer.LastIndexedHeight {
@@ -1021,6 +1021,9 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 
 	var getSCResults rpc.GetSC_Result
 	getSCParams := rpc.GetSC_Params{SCID: scid, Code: true, Variables: true, TopoHeight: topoheight}
+	if client.WS == nil {
+		return
+	}
 	if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
 		log.Printf("[GetSCVariables] ERROR - GetSCVariables failed: %v\n", err)
 		return variables, code, balances
@@ -1277,11 +1280,19 @@ func (ind *Indexer) Close() {
 	ind.Closing = true
 
 	// Sleep for safety
-	time.Sleep(time.Second * 5)
+	time.Sleep(time.Second * 1)
 
 	// Close websocket connection cleanly
-	ind.RPC.WS.Close()
+	if ind.RPC.WS != nil {
+		ind.RPC.WS.Close()
+	}
 
 	// Close out grav db cleanly
+	writeWait, _ := time.ParseDuration("10ms")
+	for ind.Backend.Writing == 1 {
+		time.Sleep(writeWait)
+	}
+	ind.Backend.Writing = 1
 	ind.Backend.DB.Close()
+	ind.Backend.Writing = 0
 }

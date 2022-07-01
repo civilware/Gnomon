@@ -420,7 +420,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for k, v := range sclist {
 						if k == line_parts[1] {
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							keysstringbyvalue, keysuint64byvalue := vi.Backend.GetSCIDKeysByValue(k, line_parts[2], vi.ChainHeight)
+							keysstringbyvalue, keysuint64byvalue := vi.Backend.GetSCIDKeysByValue(k, line_parts[2], vi.ChainHeight, true)
 							for _, skey := range keysstringbyvalue {
 								log.Printf("%v\n", skey)
 							}
@@ -464,7 +464,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for k, v := range sclist {
 						if k == line_parts[1] {
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							valuesstringbykey, valuesuint64bykey := vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight)
+							valuesstringbykey, valuesuint64bykey := vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
 							for _, sval := range valuesstringbykey {
 								log.Printf("%v\n", sval)
 							}

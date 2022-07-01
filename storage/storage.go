@@ -556,10 +556,10 @@ func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) map[int64][]*stru
 }
 
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)
-func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64) {
+func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height int64, rmax bool) (keysstring []string, keysuint64 []uint64) {
 	scidInteractionHeights := g.GetSCIDInteractionHeight(scid)
 
-	interactionHeight := g.GetInteractionIndex(height, scidInteractionHeights)
+	interactionHeight := g.GetInteractionIndex(height, scidInteractionHeights, rmax)
 
 	// TODO: If there's no interaction height, do we go get scvars against daemon and store? Or do we just ignore and return nil
 	variables := g.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
@@ -608,10 +608,10 @@ func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height 
 }
 
 // Gets SC values by key at given topoheight who's key equates to a given interface{} (string/uint64)
-func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
+func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height int64, rmax bool) (valuesstring []string, valuesuint64 []uint64) {
 	scidInteractionHeights := g.GetSCIDInteractionHeight(scid)
 
-	interactionHeight := g.GetInteractionIndex(height, scidInteractionHeights)
+	interactionHeight := g.GetInteractionIndex(height, scidInteractionHeights, rmax)
 
 	// TODO: If there's no interaction height, do we go get scvars against daemon and store? Or do we just ignore and return nil
 	variables := g.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
@@ -731,13 +731,17 @@ func (g *GravitonStore) GetSCIDInteractionHeight(scid string) []int64 {
 	return nil
 }
 
-func (g *GravitonStore) GetInteractionIndex(topoheight int64, heights []int64) (height int64) {
+func (g *GravitonStore) GetInteractionIndex(topoheight int64, heights []int64, rmax bool) (height int64) {
+	if len(heights) <= 0 {
+		return height
+	}
+
 	// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
 	sort.SliceStable(heights, func(i, j int) bool {
 		return heights[i] > heights[j]
 	})
 
-	if topoheight > heights[0] {
+	if topoheight > heights[0] || rmax {
 		return heights[0]
 	}
 
