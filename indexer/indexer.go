@@ -1278,6 +1278,7 @@ func (indexer *Indexer) ValidateSCSignature(scid string, key string, height int6
 func (ind *Indexer) Close() {
 	// Tell indexer a closing operation is happening; this will close out loops on next iteration
 	ind.Closing = true
+	ind.Backend.Closing = true
 
 	// Sleep for safety
 	time.Sleep(time.Second * 1)

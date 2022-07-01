@@ -121,6 +121,9 @@ func notFound(writer http.ResponseWriter, _ *http.Request) {
 
 // Continuous check on number of validated scs etc. for base stats of service.
 func (apiServer *ApiServer) collectStats() {
+	if apiServer.Backend.Closing {
+		return
+	}
 	stats := make(map[string]interface{})
 
 	// Get all scid:owner

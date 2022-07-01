@@ -250,6 +250,9 @@ func main() {
 				return
 			default:
 			}
+			if Gnomon.Closing {
+				return
+			}
 
 			validatedSCIDs := Graviton_backend.GetAllOwnersAndSCIDs()
 			gnomon_count := int64(len(validatedSCIDs))
