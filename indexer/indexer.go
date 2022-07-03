@@ -132,66 +132,68 @@ func (indexer *Indexer) StartDaemonMode() {
 
 		// For now, no testnet SC deployed so we skip. Use gnomon SC for data if mainnet
 		getinfo := indexer.Backend.GetGetInfoDetails()
-		if !getinfo.Testnet {
-			// All could be future optimized .. for now it's slower but works.
-			variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
-			if len(variables) > 0 {
-				_ = code
-				keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
+		if getinfo != nil {
+			if !getinfo.Testnet {
+				// All could be future optimized .. for now it's slower but works.
+				variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
+				if len(variables) > 0 {
+					_ = code
+					keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
 
-				// Check  if keysstring is nil or not to avoid any sort of panics
-				var sigstr string
-				if len(keysstring) > 0 {
-					sigstr = keysstring[0]
-				}
+					// Check  if keysstring is nil or not to avoid any sort of panics
+					var sigstr string
+					if len(keysstring) > 0 {
+						sigstr = keysstring[0]
+					}
 
-				validated, _ := indexer.ValidateSCSignature(code, sigstr)
+					validated, _ := indexer.ValidateSCSignature(code, sigstr)
 
-				// Ensure SC signature is validated (LOAD("signature") checks out to code validation)
-				if validated {
-					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code VALID - proceeding to inject scid data.", gnomon_scid)
+					// Ensure SC signature is validated (LOAD("signature") checks out to code validation)
+					if validated {
+						log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code VALID - proceeding to inject scid data.", gnomon_scid)
 
-					scidstoadd := make(map[string]*structures.FastSyncImport)
+						scidstoadd := make(map[string]*structures.FastSyncImport)
 
-					// Check k/v pairs for the necessary info: keys/values - scid/headers, scidowner/owner, scidheight/height
-					for _, v := range variables {
-						switch ckey := v.Key.(type) {
-						case string:
-							if v.Value != nil {
-								switch len(ckey) {
-								case 64:
-									// Check for k/v scid/headers
-									if scidstoadd[ckey] == nil {
-										scidstoadd[ckey] = &structures.FastSyncImport{}
+						// Check k/v pairs for the necessary info: keys/values - scid/headers, scidowner/owner, scidheight/height
+						for _, v := range variables {
+							switch ckey := v.Key.(type) {
+							case string:
+								if v.Value != nil {
+									switch len(ckey) {
+									case 64:
+										// Check for k/v scid/headers
+										if scidstoadd[ckey] == nil {
+											scidstoadd[ckey] = &structures.FastSyncImport{}
+										}
+										scidstoadd[ckey].Headers = v.Value.(string)
+									case 69:
+										// Check for k/v scidowner/owner
+										if scidstoadd[ckey[0:64]] == nil {
+											scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+										}
+										scidstoadd[ckey[0:64]].Owner = v.Value.(string)
+									case 70:
+										// Check for k/v scidheight/height
+										if scidstoadd[ckey[0:64]] == nil {
+											scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+										}
+										scidstoadd[ckey[0:64]].Height = v.Value.(string)
+									default:
+										// Nothing - only should match defined ckey lengths
 									}
-									scidstoadd[ckey].Headers = v.Value.(string)
-								case 69:
-									// Check for k/v scidowner/owner
-									if scidstoadd[ckey[0:64]] == nil {
-										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
-									}
-									scidstoadd[ckey[0:64]].Owner = v.Value.(string)
-								case 70:
-									// Check for k/v scidheight/height
-									if scidstoadd[ckey[0:64]] == nil {
-										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
-									}
-									scidstoadd[ckey[0:64]].Height = v.Value.(string)
-								default:
-									// Nothing - only should match defined ckey lengths
 								}
+							default:
+								// Nothing - expect only string for value types specifically to Gnomon
 							}
-						default:
-							// Nothing - expect only string for value types specifically to Gnomon
 						}
-					}
 
-					err := indexer.AddSCIDToIndex(scidstoadd)
-					if err != nil {
-						log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
+						err := indexer.AddSCIDToIndex(scidstoadd)
+						if err != nil {
+							log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
+						}
+					} else {
+						log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
 					}
-				} else {
-					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
 				}
 			}
 		}
