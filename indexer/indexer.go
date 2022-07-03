@@ -50,7 +50,7 @@ type Indexer struct {
 }
 
 // TODO - update this with gnomon scid that stores scid indexes and headers
-const gnomon_scid = ""
+const gnomon_scid = "a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4"
 
 // Defines the number of blocks to jump when testing pruned nodes.
 const block_jump = int64(10000)
@@ -97,7 +97,6 @@ func (indexer *Indexer) StartDaemonMode() {
 		break
 	}
 	time.Sleep(1 * time.Second)
-	//log.Printf("%v", indexer.RPC.WS)
 
 	// Continuously getInfo from daemon to update topoheight globally
 	go indexer.getInfo()
@@ -131,17 +130,67 @@ func (indexer *Indexer) StartDaemonMode() {
 			}
 		}
 
-		// TODO: Get the current scids via gnomon SC and then AddSCIDToIndex(scids) so they get initial var stores, added to indexer.ValidatedSCs etc.
-		/*
-			var tempscids []string
-			tempscids = append(tempscids, "0000000000000000000000000000000000000000000000000000000000000001")
-			tempscids = append(tempscids, "fb1a0e7721efae2e3ab3e841570a41ef5f4cb3e655d7b55323ff2f633f8a71ca")
+		// All could be future optimized .. for now it's slower but works.
+		variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
+		if len(variables) > 0 {
+			_ = code
+			keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
 
-			err := indexer.AddSCIDToIndex(tempscids)
-			if err != nil {
-				log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
+			// Check  if keysstring is nil or not to avoid any sort of panics
+			var sigstr string
+			if len(keysstring) > 0 {
+				sigstr = keysstring[0]
 			}
-		*/
+
+			validated, _ := indexer.ValidateSCSignature(code, sigstr)
+
+			// Ensure SC signature is validated (LOAD("signature") checks out to code validation)
+			if validated {
+				log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code VALID - proceeding to inject scid data.", gnomon_scid)
+
+				scidstoadd := make(map[string]*structures.FastSyncImport)
+
+				// Check k/v pairs for the necessary info: keys/values - scid/headers, scidowner/owner, scidheight/height
+				for _, v := range variables {
+					switch ckey := v.Key.(type) {
+					case string:
+						if v.Value != nil {
+							switch len(ckey) {
+							case 64:
+								// Check for k/v scid/headers
+								if scidstoadd[ckey] == nil {
+									scidstoadd[ckey] = &structures.FastSyncImport{}
+								}
+								scidstoadd[ckey].Headers = v.Value.(string)
+							case 69:
+								// Check for k/v scidowner/owner
+								if scidstoadd[ckey[0:64]] == nil {
+									scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+								}
+								scidstoadd[ckey[0:64]].Owner = v.Value.(string)
+							case 70:
+								// Check for k/v scidheight/height
+								if scidstoadd[ckey[0:64]] == nil {
+									scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+								}
+								scidstoadd[ckey[0:64]].Height = v.Value.(string)
+							default:
+								// Nothing - only should match defined ckey lengths
+							}
+						}
+					default:
+						// Nothing - expect only string for value types specifically to Gnomon
+					}
+				}
+
+				err := indexer.AddSCIDToIndex(scidstoadd)
+				if err != nil {
+					log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
+				}
+			} else {
+				log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
+			}
+		}
 	}
 
 	for _, vi := range hardcodedscids {
@@ -165,6 +214,7 @@ func (indexer *Indexer) StartDaemonMode() {
 		}
 
 		if contains {
+			log.Printf("[AddSCIDToIndex] Hardcoded SCID matches search filter. Adding SCID %v", vi)
 			indexer.Lock()
 			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
 			indexer.Unlock()
@@ -357,15 +407,15 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 }
 
 // Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
-func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
-	for _, v := range scid {
+func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport) (err error) {
+	for scid, fsi := range scidstoadd {
 		// Check if already validated
-		if scidExist(indexer.ValidatedSCs, v) {
+		if scidExist(indexer.ValidatedSCs, scid) {
 			//log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", v)
 			continue
 		} else {
 			// Validate SCID is *actually* a valid SCID
-			scVars, scCode, _ := indexer.RPC.GetSCVariables(v, indexer.ChainHeight)
+			scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
 
 			var contains bool
 
@@ -382,8 +432,13 @@ func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
 			if contains {
 				// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 				if len(scVars) > 0 {
+					if fsi != nil {
+						log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
+					} else {
+						log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
+					}
 					indexer.Lock()
-					indexer.ValidatedSCs = append(indexer.ValidatedSCs, v)
+					indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
 					indexer.Unlock()
 					writeWait, _ := time.ParseDuration("50ms")
 					for indexer.Backend.Writing == 1 {
@@ -391,21 +446,25 @@ func (indexer *Indexer) AddSCIDToIndex(scid []string) (err error) {
 						time.Sleep(writeWait)
 					}
 					indexer.Backend.Writing = 1
-					err = indexer.Backend.StoreOwner(v, "")
+					if fsi != nil {
+						err = indexer.Backend.StoreOwner(scid, fsi.Owner)
+					} else {
+						err = indexer.Backend.StoreOwner(scid, "")
+					}
 					if err != nil {
 						log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
 					}
-					err = indexer.Backend.StoreSCIDVariableDetails(v, scVars, indexer.ChainHeight)
+					err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
 					if err != nil {
 						log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
 					}
-					err = indexer.Backend.StoreSCIDInteractionHeight(v, indexer.ChainHeight)
+					err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
 					if err != nil {
 						log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
 					}
 					indexer.Backend.Writing = 0
 				} else {
-					log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v, indexer.ChainHeight)
+					log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", scid, indexer.ChainHeight)
 				}
 			}
 		}
@@ -1091,8 +1150,11 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 }
 
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)
-func (indexer *Indexer) GetSCIDKeysByValue(scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64) {
-	variables, _, _ := indexer.RPC.GetSCVariables(scid, height)
+func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable, scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64) {
+	// If variables were not provided, then fetch them.
+	if len(variables) <= 0 {
+		variables, _, _ = indexer.RPC.GetSCVariables(scid, height)
+	}
 
 	// Switch against the value passed. If it's a uint64 or string
 	switch inpvar := val.(type) {
@@ -1138,8 +1200,11 @@ func (indexer *Indexer) GetSCIDKeysByValue(scid string, val interface{}, height 
 }
 
 // Gets SC values by key at given topoheight who's key equates to a given interface{} (string/uint64)
-func (indexer *Indexer) GetSCIDValuesByKey(scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
-	variables, _, _ := indexer.RPC.GetSCVariables(scid, height)
+func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable, scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
+	// If variables were not provided, then fetch them.
+	if len(variables) <= 0 {
+		variables, _, _ = indexer.RPC.GetSCVariables(scid, height)
+	}
 
 	// Switch against the value passed. If it's a uint64 or string
 	switch inpvar := key.(type) {
@@ -1200,7 +1265,7 @@ func (indexer *Indexer) ConvertSCIDKeys(variables []*structures.SCIDVariable) (k
 }
 
 // Converts returned SCIDVariables VALUE values who's values equates to a given interface{} (string/uint64)
-func (indexer *Indexer) ConvertSCIDValules(variables []*structures.SCIDVariable) (valuesstring []string, valuesuint64 []uint64) {
+func (indexer *Indexer) ConvertSCIDValues(variables []*structures.SCIDVariable) (valuesstring []string, valuesuint64 []uint64) {
 	for _, v := range variables {
 		switch cval := v.Value.(type) {
 		case uint64:
@@ -1215,21 +1280,16 @@ func (indexer *Indexer) ConvertSCIDValules(variables []*structures.SCIDVariable)
 }
 
 // Validates that a stored signature results in the code deployed to a SC - currently allowing any 'key' to be passed through, however intended key is 'signature' or similar
-func (indexer *Indexer) ValidateSCSignature(scid string, key string, height int64) (validated bool, signer string) {
-	// TODO: two rpc calls to getsc at the moment, maybe fix above functions to pass/use other methods or returns (say scidvalues or scidkeys could also return code/balance etc.)
-	_, code, _ := indexer.RPC.GetSCVariables(scid, height)
-
-	keysstring, _ := indexer.GetSCIDValuesByKey(scid, key, height)
-
-	if keysstring[0] == "" {
+func (indexer *Indexer) ValidateSCSignature(code string, key string) (validated bool, signer string) {
+	if key == "" {
 		return
 	}
 
 	// CheckSignature
-	filedata := []byte(keysstring[0])
+	filedata := []byte(key)
 	p, _ := pem.Decode(filedata)
 	if p == nil {
-		log.Printf("[ValidateSCSignature] ERR - Unknown format of input data - %v", keysstring[0])
+		log.Printf("[ValidateSCSignature] ERR - Unknown format of input data - %v", key)
 		return
 	}
 

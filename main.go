@@ -445,7 +445,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					keysstringbyvalue, keysuint64byvalue := vi.GetSCIDKeysByValue(line_parts[1], line_parts[2], vi.ChainHeight)
+					var variables []*structures.SCIDVariable
+					keysstringbyvalue, keysuint64byvalue := vi.GetSCIDKeysByValue(variables, line_parts[1], line_parts[2], vi.ChainHeight)
 					for _, skey := range keysstringbyvalue {
 						log.Printf("%v\n", skey)
 					}
@@ -489,7 +490,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					valuesstringbykey, valuesuint64bykey := vi.GetSCIDValuesByKey(line_parts[1], line_parts[2], vi.ChainHeight)
+					var variables []*structures.SCIDVariable
+					valuesstringbykey, valuesuint64bykey := vi.GetSCIDValuesByKey(variables, line_parts[1], line_parts[2], vi.ChainHeight)
 					for _, sval := range valuesstringbykey {
 						log.Printf("%v\n", sval)
 					}
@@ -506,7 +508,16 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					validated, signer := vi.ValidateSCSignature(line_parts[1], "signature", vi.ChainHeight)
+					variables, code, _ := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight)
+					keysstring, _ := vi.GetSCIDValuesByKey(variables, line_parts[1], "signature", vi.ChainHeight)
+
+					// Check  if keysstring is nil or not to avoid any sort of panics
+					var sigstr string
+					if len(keysstring) > 0 {
+						sigstr = keysstring[0]
+					}
+					validated, signer := vi.ValidateSCSignature(code, sigstr)
+
 					log.Printf("Validated: %v", validated)
 					log.Printf("Signer: %v", signer)
 					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
@@ -518,9 +529,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					var scl []string
-					scl = append(scl, line_parts[1])
-					err = vi.AddSCIDToIndex(scl)
+					scidstoadd := make(map[string]*structures.FastSyncImport)
+					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
+					err = vi.AddSCIDToIndex(scidstoadd)
 					if err != nil {
 						log.Printf("Err - %v", err)
 					}

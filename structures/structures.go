@@ -58,6 +58,12 @@ type SCIDVariable struct {
 	Value interface{}
 }
 
+type FastSyncImport struct {
+	Owner   string
+	Height  string
+	Headers string
+}
+
 type SCIDInteractionHeight struct {
 	Heights map[int64]string
 }
