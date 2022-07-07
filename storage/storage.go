@@ -59,6 +59,22 @@ func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
 	return Graviton_backend
 }
 
+// Builds new Graviton DB based on input from main() RAM store
+func NewGravDBRAM(dbmigratewait string) *GravitonStore {
+	var err error
+	var Graviton_backend *GravitonStore = &GravitonStore{}
+
+	Graviton_backend.DBMigrateWait, _ = time.ParseDuration(dbmigratewait)
+
+	//Graviton_backend.DB, err = graviton.NewDiskStore(Graviton_backend.DBPath)
+	Graviton_backend.DB, err = graviton.NewMemStore()
+	if err != nil {
+		log.Fatalf("[NewGravDB] Could not create db store: %v\n", err)
+	}
+
+	return Graviton_backend
+}
+
 // Stores gnomon's last indexed height - this is for stateful stores on close and reference on open
 func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 	store := g.DB

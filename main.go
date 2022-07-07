@@ -50,7 +50,8 @@ Options:
   --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
-  --fastsync	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.`
+  --fastsync	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
+  --ramstore	True/false value to define if the db will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.`
 
 var Exit_In_Progress = make(chan bool)
 
@@ -61,6 +62,7 @@ var get_info_ssl_endpoint string
 var sslenabled bool
 var closeondisconnect bool
 var fastsync bool
+var ramstore bool
 var search_filter string
 var mbl bool
 var version = "0.1a"
@@ -173,15 +175,28 @@ func main() {
 		}
 	}
 
-	// Database
-	var shasum string
-	if search_filter == "" {
-		shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
-	} else {
-		shasum = fmt.Sprintf("%x", sha1.Sum([]byte(search_filter)))
+	// Uses RAM store for grav db
+	if arguments["--ramstore"] != nil {
+		ramstorestr := arguments["--ramstore"].(string)
+		if ramstorestr == "true" {
+			ramstore = true
+		}
 	}
-	db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
-	Graviton_backend := storage.NewGravDB(db_folder, "25ms")
+
+	// Database
+	var Graviton_backend *storage.GravitonStore
+	if fastsync || ramstore {
+		Graviton_backend = storage.NewGravDBRAM("25ms")
+	} else {
+		var shasum string
+		if search_filter == "" {
+			shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
+		} else {
+			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(search_filter)))
+		}
+		db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
+		Graviton_backend = storage.NewGravDB(db_folder, "25ms")
+	}
 
 	// API
 	apic := &structures.APIConfig{
@@ -355,10 +370,15 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				log.Printf("Adding new searchfilter '%v'\n", nsf)
 
 				// Database
-				nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
-				nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
-				log.Printf("Adding new database '%v'\n", nDBFolder)
-				nBackend := storage.NewGravDB(nDBFolder, "25ms")
+				var nBackend *storage.GravitonStore
+				if fastsync || ramstore {
+					nBackend = storage.NewGravDBRAM("25ms")
+				} else {
+					nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
+					nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
+					log.Printf("Adding new database '%v'\n", nDBFolder)
+					nBackend = storage.NewGravDB(nDBFolder, "25ms")
+				}
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
