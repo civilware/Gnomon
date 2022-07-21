@@ -1,25 +1,34 @@
-![](https://github.com/civilware/gnomon/blob/main/gnomon.png?raw=true)
+![](https://github.com/DEROFDN/Gnomon_Dev/blob/main/gnomon.png?raw=true)
+
+## Gnomon
+### Decentralized Search Engine
+
+Gnomon is an open source decentralized search engine built on the DERO Decentralized Application Platform. It aims to provide easy access to blockchain data by reading and indexing data received directly from the connected node (daemon). By allowing user provided search terms, Gnomon can query and index any resulting data for use in decentralized applications and more. There are no trusted third-parties, tracking services, or cloud servers that stand between you and your data.
+
+### Core Features
 
 * Smart Contract querying and indexing
 * Transaction querying and indexing
-* Transaction Markup Language
+* Transaction Markup Language (xtag) support
 * No custom daemon, no modified code.
 
-# Using Gnomon As Software
-Details coming soon.
+<br>
+Built for the masses.
 
-# Using Gnomon As A Package
+<br>
+
+## Using Gnomon As A Package
 With Gnomon you have another choice, to use the repository as a package within whatever means you'd like to use it. The basis is to be able to leverage it for your own dApps or other configurations which may need to track specific contracts or data and use it appropriately.
 
-## Search Filter(s)
+### Search Filter(s)
 ```go
 // Search filter - can be "" for any/everything, or specific to a piece of code in your template.bas files etc.
 search_filter := "Function InitializePrivate() Uint64"
 ```
 
-## Setting Up Database(s)
+### Setting Up Database(s)
 ```go
-import "github.com/civilware/Gnomon/storage"
+import "github.com/DEROFDN/Gnomon_Dev/storage"
 ...
 
 // Database
@@ -29,9 +38,9 @@ db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)   // directory in 
 Graviton_backend := storage.NewGravDB(db_folder, "25ms")
 ```
 
-## Defining Your Indexer(s)
+### Defining Your Indexer(s)
 ```go
-import "github.com/civilware/Gnomon/indexer"
+import "github.com/DEROFDN/Gnomon_Dev/indexer"
 ...
 
 // Last IndexedHeight - This can be used in addition to the db store for picking up where you left off. 
@@ -56,9 +65,9 @@ closeondisconnect := false
 defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect)
 ```
 
-## Reading From Graviton DB(s)
+### Reading From Graviton DB(s)
 ```go
-import "github.com/civilware/Gnomon/storage"
+import "github.com/DEROFDN/Gnomon_Dev/storage"
 ...
 
 // Examples:
@@ -77,9 +86,9 @@ allSCIDInvokes := Graviton_backend.GetAllSCIDInvokeDetails("scid")
 // And so on... get functions within storage.go
 ```
 
-## Defining API(s)
+### Defining API(s)
 ```go
-import "github.com/civilware/Gnomon/structures"
+import "github.com/DEROFDN/Gnomon_Dev/structures"
 ...
 
 // API
