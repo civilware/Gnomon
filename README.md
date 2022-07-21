@@ -1,4 +1,4 @@
-![](https://github.com/DEROFDN/Gnomon_Dev/blob/main/gnomon.png?raw=true)
+![](https://github.com/civilware/Gnomon/blob/main/gnomon.png?raw=true)
 
 ## Gnomon
 ### Decentralized Search Engine
@@ -28,7 +28,7 @@ search_filter := "Function InitializePrivate() Uint64"
 
 ### Setting Up Database(s)
 ```go
-import "github.com/DEROFDN/Gnomon_Dev/storage"
+import "github.com/civilware/Gnomon/storage"
 ...
 
 // Database
@@ -40,7 +40,7 @@ Graviton_backend := storage.NewGravDB(db_folder, "25ms")
 
 ### Defining Your Indexer(s)
 ```go
-import "github.com/DEROFDN/Gnomon_Dev/indexer"
+import "github.com/civilware/Gnomon/indexer"
 ...
 
 // Last IndexedHeight - This can be used in addition to the db store for picking up where you left off. 
@@ -67,7 +67,7 @@ defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_index
 
 ### Reading From Graviton DB(s)
 ```go
-import "github.com/DEROFDN/Gnomon_Dev/storage"
+import "github.com/civilware/Gnomon/storage"
 ...
 
 // Examples:
@@ -88,7 +88,7 @@ allSCIDInvokes := Graviton_backend.GetAllSCIDInvokeDetails("scid")
 
 ### Defining API(s)
 ```go
-import "github.com/DEROFDN/Gnomon_Dev/structures"
+import "github.com/civilware/Gnomon/structures"
 ...
 
 // API
