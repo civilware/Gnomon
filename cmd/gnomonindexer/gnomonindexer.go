@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -76,8 +77,6 @@ func main() {
 
 	n := runtime.NumCPU()
 	runtime.GOMAXPROCS(n)
-
-	//globals.Initialize()
 
 	Gnomon.Indexers = make(map[string]*indexer.Indexer)
 
@@ -222,20 +221,17 @@ func main() {
 	switch Gnomon.RunMode {
 	case "daemon":
 		go defaultIndexer.StartDaemonMode()
+	case "wallet":
+		go defaultIndexer.StartWalletMode("")
 	default:
 		go defaultIndexer.StartDaemonMode()
 	}
 	Gnomon.Indexers[search_filter] = defaultIndexer
 
-	// Setup ctrl+c exit
-	//SetupCloseHandler(Graviton_backend, defaultIndexer)
-
 	// Readline GNOMON
 	RLI, err = readline.NewEx(&readline.Config{
-		//Prompt:          "\033[92mGNOMON:\033[32m»\033[0m",
-		Prompt:      "\033[92mGNOMON\033[32m>>>\033[0m ",
-		HistoryFile: filepath.Join(os.TempDir(), "derod_readline.tmp"),
-		//AutoComplete:    completer,
+		Prompt:          "\033[92mGNOMON\033[32m>>>\033[0m ",
+		HistoryFile:     filepath.Join(os.TempDir(), "derod_readline.tmp"),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 
@@ -434,16 +430,165 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				log.Printf("listsc_byscid needs a single scid as argument\n")
 			}
-		case command == "listscidkey_byvaluestored":
+		case command == "listsc_byheight":
+			{
+				if len(line_parts) == 1 {
+					for ki, vi := range g.Indexers {
+						log.Printf("- Indexer '%v'", ki)
+						var scinstalls []*structures.SCTXParse
+						sclist := vi.Backend.GetAllOwnersAndSCIDs()
+						for k, _ := range sclist {
+							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							i := 0
+							for _, v := range invokedetails {
+								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+								if sc_action == "1" {
+									i++
+									scinstalls = append(scinstalls, v)
+									//log.Printf("%v - %v", v.Scid, v.Height)
+								}
+							}
+
+							if i == 0 {
+								log.Printf("No sc_action of '1' for %v", k)
+							}
+						}
+
+						if len(scinstalls) > 0 {
+							// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+							sort.SliceStable(scinstalls, func(i, j int) bool {
+								return scinstalls[i].Height < scinstalls[j].Height
+							})
+
+							// +1 for hardcoded name service SC
+							for _, v := range scinstalls {
+								log.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
+							}
+							log.Printf("Total SCs installed: %v", len(scinstalls)+1)
+						}
+					}
+				} else {
+					log.Printf("listscinvoke_bysigner needs a single scid and partialsigner string as argument\n")
+				}
+			}
+		case command == "listsc_balances":
+			if len(line_parts) == 1 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count int64
+					for k, _ := range sclist {
+						_, _, cbal := vi.RPC.GetSCVariables(k, vi.ChainHeight)
+						var pc int
+						for kb, vb := range cbal {
+							if vb > 0 {
+								if pc == 0 {
+									fmt.Printf("%v:\n", k)
+								}
+								if kb == "0000000000000000000000000000000000000000000000000000000000000000" {
+									fmt.Printf("_DERO: %v\n", vb)
+								} else {
+									fmt.Printf("_Asset: %v:%v\n", kb, vb)
+								}
+								pc++
+							}
+						}
+						count++
+					}
+
+					if count == 0 {
+						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					}
+				}
+			} else {
+				log.Printf("listsc_byscid needs a single scid as argument\n")
+			}
+		case command == "listsc_byentrypoint":
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
+					var count int64
+					for _, v := range indexbyentry {
+						log.Printf("%v", v)
+						count++
+					}
+
+					if count == 0 {
+						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+					}
+				}
+			} else {
+				log.Printf("listsc_byscid needs a single scid and entrypoint as argument\n")
+			}
+		case command == "listsc_byinitialize":
+			if len(line_parts) == 1 { //&& len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var count, count2 int64
+					for k, _ := range sclist {
+						indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						for _, v := range indexbyentry {
+							log.Printf("%v", v)
+							count++
+						}
+						indexbyentry2 := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						for _, v := range indexbyentry2 {
+							log.Printf("%v", v)
+							count2++
+						}
+					}
+
+					if count == 0 && count2 == 0 {
+						log.Printf("No SCIDs with initialize called.")
+					}
+				}
+			} else {
+				log.Printf("listsc_byscid needs a single scid and entrypoint as argument\n")
+			}
+		case command == "listscinvoke_bysigner":
+			{
+				if len(line_parts) == 2 {
+					for ki, vi := range g.Indexers {
+						log.Printf("- Indexer '%v'", ki)
+						sclist := vi.Backend.GetAllOwnersAndSCIDs()
+						for k, v := range sclist {
+							indexbypartialsigner := vi.Backend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
+							if len(indexbypartialsigner) > 0 {
+								log.Printf("SCID: %v ; Owner: %v\n", k, v)
+							}
+							for _, v := range indexbypartialsigner {
+								log.Printf("%v - %v", v.Height, v.Sc_args)
+							}
+						}
+					}
+				} else {
+					log.Printf("listscinvoke_bysigner needs a single scid and partialsigner string as argument\n")
+				}
+			}
+		case command == "listscidkey_byvaluestored":
+			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
 					sclist := vi.Backend.GetAllOwnersAndSCIDs()
 					var count int64
 					for k, v := range sclist {
 						if k == line_parts[1] {
+							var keysstringbyvalue []string
+							var keysuint64byvalue []uint64
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							keysstringbyvalue, keysuint64byvalue := vi.Backend.GetSCIDKeysByValue(k, line_parts[2], vi.ChainHeight, true)
+
+							if len(line_parts) > 3 {
+								checkHeight, err := strconv.Atoi(line_parts[3])
+								if err == nil && int64(checkHeight) > 0 && int64(checkHeight) <= vi.ChainHeight {
+									keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], int64(checkHeight), false)
+								} else {
+									keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+								}
+							} else {
+								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+							}
 							for _, skey := range keysstringbyvalue {
 								log.Printf("%v\n", skey)
 							}
@@ -480,15 +625,27 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
 			}
 		case command == "listscidvalue_bykeystored":
-			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
 					sclist := vi.Backend.GetAllOwnersAndSCIDs()
 					var count int64
 					for k, v := range sclist {
 						if k == line_parts[1] {
+							var valuesstringbykey []string
+							var valuesuint64bykey []uint64
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							valuesstringbykey, valuesuint64bykey := vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+
+							if len(line_parts) > 3 {
+								checkHeight, err := strconv.Atoi(line_parts[3])
+								if err == nil && int64(checkHeight) > 0 && int64(checkHeight) <= vi.ChainHeight {
+									valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], int64(checkHeight), false)
+								} else {
+									valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+								}
+							} else {
+								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+							}
 							for _, sval := range valuesstringbykey {
 								log.Printf("%v\n", sval)
 							}
@@ -614,21 +771,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				log.Printf("GNOMON [%d/%d] R:%d >>", currheight, vi.ChainHeight, gnomon_count)
 			}
-			/*
-				case line == "change":
-					for ki, vi := range g.Indexers {
-						log.Printf("- Indexer '%v'", ki)
-						log.Printf("Old endpoint - %v", vi.Endpoint)
-						vi.Lock()
-						if vi.Endpoint == "127.0.0.1:10102" {
-							vi.Endpoint = "127.0.0.1:40402"
-						} else {
-							vi.Endpoint = "127.0.0.1:10102"
-						}
-						log.Printf("New endpoint - %v", vi.Endpoint)
-						vi.Unlock()
-					}
-			*/
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")
 			g.Close()
@@ -645,8 +787,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			log.Printf("You said: %v\n", strconv.Quote(line))
 		}
 	}
-
-	//return fmt.Errorf("can never reach here")
 }
 
 func usage(w io.Writer) {
@@ -657,6 +797,11 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed, listsc_byheight\n")
+	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0, listsc_balances\n")
+	io.WriteString(w, "\t\033[1mlistsc_byentrypoint\033[0m\tLists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate()\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address, listscinvoke_bysigner <signerstring>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluestored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluelive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidvalue_bykeystored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidvalue_bykeystored <scid> <key>\n")
@@ -673,17 +818,6 @@ func usage(w io.Writer) {
 
 func (g *GnomonServer) Close() {
 	g.Closing = true
-	/*
-		for _, v := range g.Indexers {
-			v.Closing = true
-		}
-
-		time.Sleep(time.Second * 5)
-
-		for _, v := range g.Indexers {
-			v.Backend.DB.Close()
-		}
-	*/
 
 	for _, v := range g.Indexers {
 		go v.Close()
@@ -693,28 +827,3 @@ func (g *GnomonServer) Close() {
 
 	os.Exit(0)
 }
-
-// SetupCloseHandler creates a 'listener' on a new goroutine which will notify the
-// program if it receives an interrupt from the OS. We then handle this by calling
-// our clean up procedure and exiting the program.
-// Reference: https://golangcode.com/handle-ctrl-c-exit-in-terminal/
-/*
-func SetupCloseHandler(Graviton_backend *storage.GravitonStore, defaultIndexer *indexer.Indexer) {
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Printf("\r- Ctrl+C pressed in Terminal\n")
-		log.Printf("[SetupCloseHandler] Closing - syncing stats...\n")
-
-		Gnomon.close()
-
-		time.Sleep(time.Second)
-
-		// Add 1 second sleep prior to closing to prevent db writing issues
-		time.Sleep(time.Second)
-		Graviton_backend.DB.Close()
-		os.Exit(0)
-	}()
-}
-*/

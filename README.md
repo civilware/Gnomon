@@ -61,8 +61,11 @@ mbl := false
 // closeondisconnect - More of a 'specific' use case feature - if daemon connectivity (after previously being connected) ceases for x time, then close the indexer which eventually panics. Will be cleaner in future or removed with upstream daemons being pooled. Primary use case is to ensure api is disconnected when daemon is not connected for bad data, could accomplish other ways.
 closeondisconnect := false
 
+// fastsync - Syncs against gnomon scid for scids and compares against search_filter, starts you at current topoheight
+fastsync := false
+
 // Indexer
-defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect)
+defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fastsync)
 ```
 
 ### Reading From Graviton DB(s)

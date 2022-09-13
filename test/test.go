@@ -17,8 +17,8 @@ import (
 	"github.com/civilware/Gnomon/structures"
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
-	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
+	"github.com/deroproject/derohe/transaction"
 	"github.com/deroproject/graviton"
 	"github.com/gorilla/websocket"
 )
@@ -49,11 +49,11 @@ var DeroDB = &Derodbstore{}
 func main() {
 	log.Printf("Hello World")
 
-	var blid = "256480179e6e02cf386fbf1d61a5401bf61998eb1e8ea72dd46054b10a7be972"
+	//var blid = "256480179e6e02cf386fbf1d61a5401bf61998eb1e8ea72dd46054b10a7be972"
 	var err error
 
 	var client = &Client{}
-	var endpoint = "127.0.0.1:10102"
+	var endpoint = "127.0.0.1:40402"
 
 	client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+endpoint+"/ws", nil)
 	input_output := rwc.New(client.WS)
@@ -76,78 +76,98 @@ func main() {
 		return
 	}
 
-	var io rpc.GetBlock_Result
-	var ip = rpc.GetBlock_Params{Hash: blid}
+	var inputparam rpc.GetTransaction_Params
+	var output rpc.GetTransaction_Result
 
-	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
-		log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
+	//inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, "015d4406b3f96ff38d63192cbffa39014e5c54cdb3f9bb8eb937f5183ee2257a")
+	inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, "daacbf8150162b786b07b6d2331c8be29e69a9d33044bfa756227a264f88a9db")
+
+	if err = client.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
+		log.Printf("[indexBlock] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
 		return
 	}
 
-	// Gets SC variable details
-	var variables []*structures.SCIDVariable
+	tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
+	var tx transaction.Transaction
+	tx.Deserialize(tx_bin)
 
-	var getSCResults rpc.GetSC_Result
-	getSCParams := rpc.GetSC_Params{SCID: "ae55db1581b79f02f86b70fc338a7b91b14ded071a31972d9cfdb0eca6e302af", Code: false, Variables: true, TopoHeight: 529769}
-	if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-		log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
-		return
-	}
+	log.Printf("%v", tx.TransactionType)
+	log.Printf("%v", tx)
 
-	for k, v := range getSCResults.VariableStringKeys {
-		currVar := &structures.SCIDVariable{}
-		if k == "C" {
-			continue
+	/*
+		var io rpc.GetBlock_Result
+		var ip = rpc.GetBlock_Params{Hash: blid}
+
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
+			log.Printf("[indexBlock] ERROR - GetBlock failed: %v\n", err)
+			return
 		}
-		currVar.Key = k
-		switch cval := v.(type) {
-		case uint64:
-			currVar.Value = cval
-		case string:
-			// hex decode since all strings are hex encoded
-			dstr, _ := hex.DecodeString(cval)
-			p := new(crypto.Point)
-			if err := p.DecodeCompressed(dstr); err == nil {
 
-				addr := rpc.NewAddressFromKeys(p)
-				currVar.Value = addr.String()
-			} else {
-				currVar.Value = string(dstr)
+		// Gets SC variable details
+		var variables []*structures.SCIDVariable
+
+		var getSCResults rpc.GetSC_Result
+		getSCParams := rpc.GetSC_Params{SCID: "ae55db1581b79f02f86b70fc338a7b91b14ded071a31972d9cfdb0eca6e302af", Code: false, Variables: true, TopoHeight: 529769}
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+			log.Printf("[getSCVariables] ERROR - getSCVariables failed: %v\n", err)
+			return
+		}
+
+		for k, v := range getSCResults.VariableStringKeys {
+			currVar := &structures.SCIDVariable{}
+			if k == "C" {
+				continue
 			}
-		default:
-			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
-			str := fmt.Sprintf("%v", cval)
-			currVar.Value = str
-		}
-		variables = append(variables, currVar)
-		//return
-	}
+			currVar.Key = k
+			switch cval := v.(type) {
+			case uint64:
+				currVar.Value = cval
+			case string:
+				// hex decode since all strings are hex encoded
+				dstr, _ := hex.DecodeString(cval)
+				p := new(crypto.Point)
+				if err := p.DecodeCompressed(dstr); err == nil {
 
-	for k, v := range getSCResults.VariableUint64Keys {
-		currVar := &structures.SCIDVariable{}
-		currVar.Key = k
-		switch cval := v.(type) {
-		case string:
-			// hex decode since all strings are hex encoded
-			decd, _ := hex.DecodeString(cval)
-			p := new(crypto.Point)
-			if err := p.DecodeCompressed(decd); err == nil {
-
-				addr := rpc.NewAddressFromKeys(p)
-				currVar.Value = addr.String()
-			} else {
-				currVar.Value = string(decd)
+					addr := rpc.NewAddressFromKeys(p)
+					currVar.Value = addr.String()
+				} else {
+					currVar.Value = string(dstr)
+				}
+			default:
+				// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
+				str := fmt.Sprintf("%v", cval)
+				currVar.Value = str
 			}
-		case uint64:
-			currVar.Value = cval
-		default:
-			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
-			str := fmt.Sprintf("%v", cval)
-			currVar.Value = str
+			variables = append(variables, currVar)
+			//return
 		}
-		variables = append(variables, currVar)
-		//return
-	}
+
+		for k, v := range getSCResults.VariableUint64Keys {
+			currVar := &structures.SCIDVariable{}
+			currVar.Key = k
+			switch cval := v.(type) {
+			case string:
+				// hex decode since all strings are hex encoded
+				decd, _ := hex.DecodeString(cval)
+				p := new(crypto.Point)
+				if err := p.DecodeCompressed(decd); err == nil {
+
+					addr := rpc.NewAddressFromKeys(p)
+					currVar.Value = addr.String()
+				} else {
+					currVar.Value = string(decd)
+				}
+			case uint64:
+				currVar.Value = cval
+			default:
+				// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
+				str := fmt.Sprintf("%v", cval)
+				currVar.Value = str
+			}
+			variables = append(variables, currVar)
+			//return
+		}
+	*/
 
 	/*
 		// Height sorting/testing

@@ -49,11 +49,12 @@ type Indexer struct {
 	sync.RWMutex
 }
 
-// TODO - update this with gnomon scid that stores scid indexes and headers
-const gnomon_scid = "a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4"
-
 // Defines the number of blocks to jump when testing pruned nodes.
 const block_jump = int64(10000)
+
+// After daemon connection will check if mainnet/testnet and adjust accordingly
+var mainnet_gnomon_scid = "a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4"
+var testnet_gnomon_scid = "c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2"
 
 // String set of hardcoded scids which are appended to in NewIndexer. These are used for reference points such as ignoring invoke calls for indexer.Fastsync == true among other procedures.
 var hardcodedscids []string
@@ -88,7 +89,7 @@ func (indexer *Indexer) StartDaemonMode() {
 			// Break out on closing call
 			break
 		}
-		log.Printf("Trying to connect...")
+		log.Printf("[StartDaemonMode] Trying to connect...")
 		err = indexer.RPC.Connect(indexer.Endpoint)
 		if err != nil {
 			time.Sleep(1 * time.Second)
@@ -133,67 +134,73 @@ func (indexer *Indexer) StartDaemonMode() {
 		// For now, no testnet SC deployed so we skip. Use gnomon SC for data if mainnet
 		getinfo := indexer.Backend.GetGetInfoDetails()
 		if getinfo != nil {
+			// Define gnomon builtin scid for indexing
+			var gnomon_scid string
 			if !getinfo.Testnet {
-				// All could be future optimized .. for now it's slower but works.
-				variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
-				if len(variables) > 0 {
-					_ = code
-					keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
+				gnomon_scid = mainnet_gnomon_scid
+			} else {
+				gnomon_scid = testnet_gnomon_scid
+			}
 
-					// Check  if keysstring is nil or not to avoid any sort of panics
-					var sigstr string
-					if len(keysstring) > 0 {
-						sigstr = keysstring[0]
-					}
+			// All could be future optimized .. for now it's slower but works.
+			variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
+			if len(variables) > 0 {
+				_ = code
+				keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
 
-					validated, _ := indexer.ValidateSCSignature(code, sigstr)
+				// Check  if keysstring is nil or not to avoid any sort of panics
+				var sigstr string
+				if len(keysstring) > 0 {
+					sigstr = keysstring[0]
+				}
 
-					// Ensure SC signature is validated (LOAD("signature") checks out to code validation)
-					if validated {
-						log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code VALID - proceeding to inject scid data.", gnomon_scid)
+				validated, _ := indexer.ValidateSCSignature(code, sigstr)
 
-						scidstoadd := make(map[string]*structures.FastSyncImport)
+				// Ensure SC signature is validated (LOAD("signature") checks out to code validation)
+				if validated {
+					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code VALID - proceeding to inject scid data.", gnomon_scid)
 
-						// Check k/v pairs for the necessary info: keys/values - scid/headers, scidowner/owner, scidheight/height
-						for _, v := range variables {
-							switch ckey := v.Key.(type) {
-							case string:
-								if v.Value != nil {
-									switch len(ckey) {
-									case 64:
-										// Check for k/v scid/headers
-										if scidstoadd[ckey] == nil {
-											scidstoadd[ckey] = &structures.FastSyncImport{}
-										}
-										scidstoadd[ckey].Headers = v.Value.(string)
-									case 69:
-										// Check for k/v scidowner/owner
-										if scidstoadd[ckey[0:64]] == nil {
-											scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
-										}
-										scidstoadd[ckey[0:64]].Owner = v.Value.(string)
-									case 70:
-										// Check for k/v scidheight/height
-										if scidstoadd[ckey[0:64]] == nil {
-											scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
-										}
-										scidstoadd[ckey[0:64]].Height = v.Value.(string)
-									default:
-										// Nothing - only should match defined ckey lengths
+					scidstoadd := make(map[string]*structures.FastSyncImport)
+
+					// Check k/v pairs for the necessary info: keys/values - scid/headers, scidowner/owner, scidheight/height
+					for _, v := range variables {
+						switch ckey := v.Key.(type) {
+						case string:
+							if v.Value != nil {
+								switch len(ckey) {
+								case 64:
+									// Check for k/v scid/headers
+									if scidstoadd[ckey] == nil {
+										scidstoadd[ckey] = &structures.FastSyncImport{}
 									}
+									scidstoadd[ckey].Headers = v.Value.(string)
+								case 69:
+									// Check for k/v scidowner/owner
+									if scidstoadd[ckey[0:64]] == nil {
+										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+									}
+									scidstoadd[ckey[0:64]].Owner = v.Value.(string)
+								case 70:
+									// Check for k/v scidheight/height
+									if scidstoadd[ckey[0:64]] == nil {
+										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
+									}
+									scidstoadd[ckey[0:64]].Height = v.Value.(string)
+								default:
+									// Nothing - only should match defined ckey lengths
 								}
-							default:
-								// Nothing - expect only string for value types specifically to Gnomon
 							}
+						default:
+							// Nothing - expect only string for value types specifically to Gnomon
 						}
-
-						err := indexer.AddSCIDToIndex(scidstoadd)
-						if err != nil {
-							log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
-						}
-					} else {
-						log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
 					}
+
+					err := indexer.AddSCIDToIndex(scidstoadd)
+					if err != nil {
+						log.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
+					}
+				} else {
+					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
 				}
 			}
 		}
@@ -220,7 +227,7 @@ func (indexer *Indexer) StartDaemonMode() {
 		}
 
 		if contains {
-			log.Printf("[AddSCIDToIndex] Hardcoded SCID matches search filter. Adding SCID %v", vi)
+			//log.Printf("[AddSCIDToIndex] Hardcoded SCID matches search filter. Adding SCID %v", vi)
 			indexer.Lock()
 			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
 			indexer.Unlock()
@@ -311,6 +318,9 @@ func (indexer *Indexer) StartDaemonMode() {
 								}
 								if rewindIndex == 0 {
 									rewindIndex = currIndex - block_jump + 1
+									if rewindIndex < 0 {
+										rewindIndex = 1
+									}
 								} else {
 									log.Printf("Checking GetBlock at %v", rewindIndex)
 									_, err = indexer.RPC.getBlockHash(uint64(rewindIndex))
@@ -365,15 +375,25 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 	var err error
 
 	// Simple connect loop .. if connection fails initially then keep trying, else break out and continue on. Connect() is handled in getInfo() for retries later on if connection ceases again
-	go func() {
-		for {
-			err = indexer.RPC.Connect(indexer.Endpoint)
-			if err != nil {
-				continue
-			}
+	/*
+		TODO:
+		var astr []string
+		astr = append(astr, "Basic dGVzdDp0ZXN0cGFzcw==")
+		client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+endpoint+"/ws", http.Header{"Authorization": astr})
+	*/
+	for {
+		if indexer.Closing {
+			// Break out on closing call
 			break
 		}
-	}()
+		log.Printf("[StartDaemonMode] Trying to connect...")
+		err = indexer.RPC.Connect(indexer.Endpoint)
+		if err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		break
+	}
 	time.Sleep(1 * time.Second)
 
 	// Continuously getInfo from daemon to update topoheight globally
@@ -414,67 +434,76 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 
 // Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
 func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport) (err error) {
+	var wg sync.WaitGroup
+	wg.Add(len(scidstoadd))
+
 	for scid, fsi := range scidstoadd {
-		// Check if already validated
-		if scidExist(indexer.ValidatedSCs, scid) {
-			//log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", v)
-			continue
-		} else {
-			// Validate SCID is *actually* a valid SCID
-			scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
+		go func(scid string, fsi *structures.FastSyncImport) {
+			// Check if already validated
+			if scidExist(indexer.ValidatedSCs, scid) {
+				//log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", scid)
+				wg.Done()
 
-			var contains bool
-
-			// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-			if indexer.SearchFilter == "" {
-				contains = true
+				return
 			} else {
-				// Ensure scCode is not blank (e.g. an invalid scid)
-				if scCode != "" {
-					contains = strings.Contains(scCode, indexer.SearchFilter)
-				}
-			}
+				// Validate SCID is *actually* a valid SCID
+				scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
 
-			if contains {
-				// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
-				if len(scVars) > 0 {
-					if fsi != nil {
-						log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
-					} else {
-						log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
-					}
-					indexer.Lock()
-					indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
-					indexer.Unlock()
-					writeWait, _ := time.ParseDuration("50ms")
-					for indexer.Backend.Writing == 1 {
-						//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-						time.Sleep(writeWait)
-					}
-					indexer.Backend.Writing = 1
-					if fsi != nil {
-						err = indexer.Backend.StoreOwner(scid, fsi.Owner)
-					} else {
-						err = indexer.Backend.StoreOwner(scid, "")
-					}
-					if err != nil {
-						log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
-					}
-					err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
-					if err != nil {
-						log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
-					}
-					err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
-					if err != nil {
-						log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
-					}
-					indexer.Backend.Writing = 0
+				var contains bool
+
+				// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+				if indexer.SearchFilter == "" {
+					contains = true
 				} else {
-					log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", scid, indexer.ChainHeight)
+					// Ensure scCode is not blank (e.g. an invalid scid)
+					if scCode != "" {
+						contains = strings.Contains(scCode, indexer.SearchFilter)
+					}
+				}
+
+				if contains {
+					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
+					if len(scVars) > 0 {
+						if fsi != nil {
+							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
+						} else {
+							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
+						}
+						indexer.Lock()
+						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
+						indexer.Unlock()
+						writeWait, _ := time.ParseDuration("50ms")
+						for indexer.Backend.Writing == 1 {
+							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+							time.Sleep(writeWait)
+						}
+						indexer.Backend.Writing = 1
+						if fsi != nil {
+							err = indexer.Backend.StoreOwner(scid, fsi.Owner)
+						} else {
+							err = indexer.Backend.StoreOwner(scid, "")
+						}
+						if err != nil {
+							log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
+						}
+						err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
+						if err != nil {
+							log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
+						}
+						err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
+						if err != nil {
+							log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+						}
+						indexer.Backend.Writing = 0
+					} else {
+						log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", scid, indexer.ChainHeight)
+					}
 				}
 			}
-		}
+			wg.Done()
+		}(scid, fsi)
 	}
+	wg.Wait()
 
 	return err
 }
@@ -483,9 +512,11 @@ func (client *Client) Connect(endpoint string) (err error) {
 	// Used to check if the endpoint has changed.. if so, then close WS to current and update WS
 	if client.WS != nil {
 		remAddr := client.WS.RemoteAddr()
-		if strings.Contains(remAddr.String(), endpoint) {
+		var pingpong string
+		err2 := client.RPC.CallResult(context.Background(), "DERO.Ping", nil, &pingpong)
+		if strings.Contains(remAddr.String(), endpoint) && err2 == nil {
 			// Endpoint is the same, continue on
-			return err
+			return
 		} else {
 			// Remote addr (current ws connection endpoint) does not match indexer endpoint - re-connecting
 			client.Lock()
@@ -504,7 +535,7 @@ func (client *Client) Connect(endpoint string) (err error) {
 			Connected = true
 		}
 	} else {
-		log.Printf("[Connect] ERROR connecting to daemon %v\n", err)
+		log.Printf("[Connect] ERROR connecting to wallet %v\n", err)
 
 		if Connected {
 			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws\n", endpoint)
@@ -619,11 +650,13 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 				} else {
 					log.Printf("[indexBlock] ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
 					//continue
-					if method == "installsc" {
-						// We do not store a ringsize > 2 of installsc calls. Only of SC interactions via sc_invoke for ringsize > 2 and just blank out the sender
-						//continue
-						wg.Done()
-					}
+					/*
+						if method == "installsc" {
+							// We do not store a ringsize > 2 of installsc calls. Only of SC interactions via sc_invoke for ringsize > 2 and just blank out the sender
+							//continue
+							//wg.Done()
+						}
+					*/
 				}
 				//time.Sleep(2 * time.Second)
 				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Payloads: tx.Payloads, Fees: sc_fees, Height: topoheight})
@@ -886,7 +919,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						}
 						Graviton_backend.Writing = 1
 
-						// If a hardcodedscid invoke + fastsync is enabled, do not log the invoke details.
+						// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
 						if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
 							log.Printf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 						} else {
@@ -896,12 +929,12 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 								time.Sleep(5 * time.Second)
 								return err
 							}
-						}
 
-						// Gets the SC variables (key/value) at a given topoheight and then stores them
-						scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, topoheight)
-						Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
-						Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
+							// Gets the SC variables (key/value) at a given topoheight and then stores them
+							scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, topoheight)
+							Graviton_backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, topoheight)
+							Graviton_backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, topoheight)
+						}
 						Graviton_backend.Writing = 0
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
@@ -1082,7 +1115,7 @@ func (indexer *Indexer) getWalletHeight() {
 // Gets SC variable details
 func (client *Client) GetSCVariables(scid string, topoheight int64) (variables []*structures.SCIDVariable, code string, balances map[string]uint64) {
 	var err error
-	balances = make(map[string]uint64)
+	//balances = make(map[string]uint64)
 
 	var getSCResults rpc.GetSC_Result
 	getSCParams := rpc.GetSC_Params{SCID: scid, Code: true, Variables: true, TopoHeight: topoheight}
@@ -1152,7 +1185,9 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 		variables = append(variables, currVar)
 	}
 
-	return variables, code, getSCResults.Balances
+	balances = getSCResults.Balances
+
+	return variables, code, balances
 }
 
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)

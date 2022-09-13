@@ -5,3 +5,6 @@ testnet*
 *.exe
 /test/mainnet
 /gnomondb
+/build
+build_all.sh
+build_package.sh

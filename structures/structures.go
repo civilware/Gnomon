@@ -64,6 +64,12 @@ type FastSyncImport struct {
 	Headers string
 }
 
+type GnomonSCIDQuery struct {
+	Owner  string
+	Height uint64
+	SCID   string
+}
+
 type SCIDInteractionHeight struct {
 	Heights map[int64]string
 }

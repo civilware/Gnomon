@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -126,13 +128,45 @@ func (apiServer *ApiServer) collectStats() {
 	}
 	stats := make(map[string]interface{})
 
-	// Get all scid:owner
+	// TODO: Removeme
+	var scinstalls []*structures.SCTXParse
 	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	for k, _ := range sclist {
+		invokedetails := apiServer.Backend.GetAllSCIDInvokeDetails(k)
+		i := 0
+		for _, v := range invokedetails {
+			sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+			if sc_action == "1" {
+				i++
+				scinstalls = append(scinstalls, v)
+				//log.Printf("%v - %v", v.Scid, v.Height)
+			}
+		}
+	}
+
+	if len(scinstalls) > 0 {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(scinstalls, func(i, j int) bool {
+			return scinstalls[i].Height < scinstalls[j].Height
+		})
+	}
+
+	var lastQueries []*structures.GnomonSCIDQuery
+
+	for _, v := range scinstalls {
+		curr := &structures.GnomonSCIDQuery{Owner: v.Sender, Height: uint64(v.Height), SCID: v.Scid}
+		lastQueries = append(lastQueries, curr)
+	}
+
+	// Get all scid:owner
+	// TODO: Re-add
+	//sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
 	regTxCount := apiServer.Backend.GetTxCount("registration")
 	burnTxCount := apiServer.Backend.GetTxCount("burn")
 	normTxCount := apiServer.Backend.GetTxCount("normal")
-	stats["numscs"] = len(sclist)
+	stats["numscs"] = len(sclist) + 1
 	stats["indexedscs"] = sclist
+	stats["indexdetails"] = lastQueries
 	stats["regTxCount"] = regTxCount
 	stats["burnTxCount"] = burnTxCount
 	stats["normTxCount"] = normTxCount
@@ -152,6 +186,7 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
 		reply["indexedscs"] = stats["indexedscs"]
+		reply["indexdetails"] = stats["indexdetails"]
 		reply["regTxCount"] = stats["regTxCount"]
 		reply["burnTxCount"] = stats["burnTxCount"]
 		reply["normTxCount"] = stats["normTxCount"]
