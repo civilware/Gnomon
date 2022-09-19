@@ -36,8 +36,8 @@ var command_line string = `Gnomon
 Gnomon Indexing Service: Index DERO's blockchain for Smart Contract deployments/listings/etc. as well as other data analysis.
 
 Usage:
-  gnomon [options]
-  gnomon -h | --help
+  gnomonindexer [options]
+  gnomonindexer -h | --help
 
 Options:
   -h --help     Show this screen.
