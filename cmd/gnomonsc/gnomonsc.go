@@ -103,7 +103,7 @@ func main() {
 	for {
 		fetchGnomonIndexes(gnomon_api_endpoint)
 		runGnomonIndexer(daemon_rpc_endpoint)
-		log.Printf("[test] Round completed. Sleeping 1 minute for next round.")
+		log.Printf("[Main] Round completed. Sleeping 1 minute for next round.")
 		time.Sleep(60 * time.Second)
 	}
 }

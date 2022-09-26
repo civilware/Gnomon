@@ -1139,6 +1139,8 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 		*/
 		currVar.Key = k
 		switch cval := v.(type) {
+		case float64:
+			currVar.Value = uint64(cval)
 		case uint64:
 			currVar.Value = cval
 		case string:
@@ -1177,6 +1179,8 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 			}
 		case uint64:
 			currVar.Value = cval
+		case float64:
+			currVar.Value = uint64(cval)
 		default:
 			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
 			str := fmt.Sprintf("%v", cval)
