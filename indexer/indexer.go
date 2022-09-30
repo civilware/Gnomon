@@ -185,7 +185,7 @@ func (indexer *Indexer) StartDaemonMode() {
 									if scidstoadd[ckey[0:64]] == nil {
 										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
 									}
-									scidstoadd[ckey[0:64]].Height = v.Value.(string)
+									scidstoadd[ckey[0:64]].Height = v.Value.(uint64)
 								default:
 									// Nothing - only should match defined ckey lengths
 								}

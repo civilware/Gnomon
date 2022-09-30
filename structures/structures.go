@@ -60,7 +60,7 @@ type SCIDVariable struct {
 
 type FastSyncImport struct {
 	Owner   string
-	Height  string
+	Height  uint64
 	Headers string
 }
 
