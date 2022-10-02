@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -39,7 +40,8 @@ Options:
   -h --help     Show this screen.
   --daemon-rpc-address=<127.0.0.1:40402>	Connect to daemon rpc.
   --wallet-rpc-address=<127.0.0.1:40403>	Connect to wallet rpc.
-  --gnomon-api-address=<127.0.0.1:8082>	Gnomon api to connect to.`
+  --gnomon-api-address=<127.0.0.1:8082>	Gnomon api to connect to.
+  --block-deploy-buffer=<10>	Block buffer inbetween SC calls. This is for safety, will be hardcoded to minimum of 2 but can define here any amount (10 default).`
 
 func main() {
 	var err error
@@ -48,7 +50,6 @@ func main() {
 	//runtime.GOMAXPROCS(n)
 
 	pollTime, _ = time.ParseDuration("5s")
-	thAddition = int64(10)
 	ringsize = uint64(2)
 
 	// Inspect argument(s)
@@ -79,6 +80,20 @@ func main() {
 	}
 
 	log.Printf("[Main] Using wallet RPC endpoint %s\n", wallet_rpc_endpoint)
+
+	thAddition = int64(10)
+	if arguments["--block-deploy-buffer"] != nil {
+		thAddition, err = strconv.ParseInt(arguments["--block-deploy-buffer"].(string), 10, 64)
+		if err != nil {
+			log.Fatalf("[Main] ERROR while converting --block-deploy-buffer to int64\n")
+			return
+		}
+		if thAddition < 2 {
+			thAddition = int64(2)
+		}
+	}
+
+	log.Printf("[Main] Using block deploy buffer of '%v' blocks.\n", thAddition)
 
 	// wallet/derod rpc clients
 	walletRPCClient = jsonrpc.NewClient("http://" + wallet_rpc_endpoint + "/json_rpc")
