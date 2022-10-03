@@ -165,7 +165,6 @@ func runGnomonIndexer(derodendpoint string) {
 	Graviton_backend = storage.NewGravDBRAM("25ms")
 	defaultIndexer := indexer.NewIndexer(Graviton_backend, "", int64(1), derodendpoint, "daemon", false, false, true)
 	go defaultIndexer.StartDaemonMode()
-	var variables []*structures.SCIDVariable
 
 	for {
 		if len(gnomonIndexes) == 0 || defaultIndexer.ChainHeight <= 1 {
@@ -177,6 +176,8 @@ func runGnomonIndexer(derodendpoint string) {
 	}
 
 	var changes bool
+	var variables []*structures.SCIDVariable
+	variables, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight)
 	log.Printf("[runGnomonIndexer] Looping through discovered SCs and checking to see if any are not indexed.")
 	for _, v := range gnomonIndexes {
 		i := 0
