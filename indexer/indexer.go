@@ -648,7 +648,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 				if tx.Payloads[0].Statement.RingSize == 2 {
 					sender = output.Txs[0].Signer
 				} else {
-					log.Printf("[indexBlock] ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
+					//log.Printf("[indexBlock] ERR - Ringsize for %v is != 2. Storing blank value for txid sender.\n", bl.Tx_hashes[i])
 					//continue
 					/*
 						if method == "installsc" {
@@ -672,7 +672,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 				for j := 0; j < len(tx.Payloads); j++ {
 					var zhash crypto.Hash
 					if tx.Payloads[j].SCID != zhash {
-						log.Printf("[indexBlock] TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
+						//log.Printf("[indexBlock] TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
 						for _, v := range output.Txs[0].Ring[j] {
 							//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: tx_fees, Height: int64(bl.Height)})
 							writeWait, _ := time.ParseDuration("50ms")
