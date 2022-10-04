@@ -437,6 +437,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	var wg sync.WaitGroup
 	wg.Add(len(scidstoadd))
 
+	log.Printf("[AddSCIDToIndex] Starting - Sorting %v SCIDs to index", len(scidstoadd))
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			// Check if already validated
@@ -508,6 +509,8 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 		}(scid, fsi)
 	}
 	wg.Wait()
+
+	log.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
 
 	return err
 }
