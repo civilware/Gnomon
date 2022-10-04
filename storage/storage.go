@@ -27,6 +27,11 @@ type GravitonStore struct {
 	Closing       bool
 }
 
+type TreeKV struct {
+	k []byte
+	v []byte
+}
+
 // TODO/NOTE: Lots of optimization/modifications are to be had here. Commit handling, tree structures, folder structure etc to reduce disk usage. It's higher now than will be in future
 
 // ---- Application Graviton/Backend functions ---- //
@@ -1335,3 +1340,68 @@ func (g *GravitonStore) GetSCIDInteractionByAddr(addr string) (scids []string) {
 }
 
 // ---- End Application Graviton/Backend functions ---- //
+
+// ---- Start TEST Graviton/Backend functions ---- //
+
+// Writes to disk RAM-stored data
+func (g *GravitonStore) StoreRAMDBInput(treenames []string, ramdb *GravitonStore) (err error) {
+	store := g.DB
+	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+	ramss, _ := ramdb.DB.LoadSnapshot(0)
+
+	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[StoreRAMDBInput] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+	}
+
+	for _, v := range treenames {
+		store = g.DB
+		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+		//log.Printf("[StoreRAMDBInput] Getting storage tree '%v'", v)
+		tree, _ := ss.GetTree(v)
+		// Catch/handle a nil tree. TODO: This should gracefully cause shutdown, if we cannot get the previous snapshot data. Also need to handle losing that snapshot, how do we handle.
+		if tree == nil {
+			var terr error
+			log.Printf("[Graviton-StoreRAMDBInput] ERROR: Tree is nil for '%v'. Attempting to rollback 1 snapshot\n", v)
+			prevss, _ := store.LoadSnapshot(ss.GetVersion() - 1)
+			tree, terr = prevss.GetTree(v)
+			if tree == nil {
+				log.Printf("[Graviton] ERROR: %v\n", terr)
+				return terr
+			}
+		}
+
+		//log.Printf("[StoreRAMDBInput] Getting RAM tree '%v'", v)
+		ramtree, _ := ramss.GetTree(v)
+		ramc := ramtree.Cursor()
+		var ramTreeKV []*TreeKV // Just rk & rv which are of type []byte
+		for rk, rv, err := ramc.First(); err == nil; rk, rv, err = ramc.Next() {
+			temp := &TreeKV{rk, rv}
+			//log.Printf("[StoreRAMDBInput] Looping through ramtree cursor k: '%v'; v: '%v'", temp.k, temp.v)
+			ramTreeKV = append(ramTreeKV, temp)
+		}
+
+		//log.Printf("[StoreRAMDBInput] Looping through ramtree cursor output to input to storage tree. (%v)", len(ramTreeKV))
+		for _, val := range ramTreeKV {
+			perr := tree.Put(val.k, val.v)
+			if perr != nil {
+				log.Printf("[Graviton] ERROR: %v", perr)
+				return perr
+			}
+		}
+
+		//log.Printf("[StoreRAMDBInput] Committing storage tree '%v'", v)
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v", cerr)
+			return cerr
+		}
+	}
+
+	return nil
+}
+
+// ---- End TEST Graviton/Backend functions ---- //

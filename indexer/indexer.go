@@ -438,6 +438,10 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	wg.Add(len(scidstoadd))
 
 	log.Printf("[AddSCIDToIndex] Starting - Sorting %v SCIDs to index", len(scidstoadd))
+	testdb := storage.NewGravDBRAM("25ms")
+	var treenames []string
+	// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
+	treenames = append(treenames, "owner")
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			// Check if already validated
@@ -473,7 +477,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 						indexer.Lock()
 						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
 						indexer.Unlock()
-						writeWait, _ := time.ParseDuration("50ms")
+						writeWait, _ := time.ParseDuration("10ms")
 						for indexer.Backend.Writing == 1 {
 							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
@@ -484,20 +488,30 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 						}
 						indexer.Backend.Writing = 1
 						if fsi != nil {
-							err = indexer.Backend.StoreOwner(scid, fsi.Owner)
+							//err = indexer.Backend.StoreOwner(scid, fsi.Owner)
+							err = testdb.StoreOwner(scid, fsi.Owner)
 						} else {
-							err = indexer.Backend.StoreOwner(scid, "")
+							//err = indexer.Backend.StoreOwner(scid, "")
+							err = testdb.StoreOwner(scid, "")
 						}
 						if err != nil {
 							log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
 						}
-						err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
+						//err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
+						err = testdb.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
 						if err != nil {
 							log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
 						}
-						err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
+						if !scidExist(treenames, scid+"vars") {
+							treenames = append(treenames, scid+"vars")
+						}
+						//err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
+						err = testdb.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
 						if err != nil {
 							log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+						}
+						if !scidExist(treenames, scid+"heights") {
+							treenames = append(treenames, scid+"heights")
 						}
 						indexer.Backend.Writing = 0
 					} else {
@@ -511,6 +525,10 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	wg.Wait()
 
 	log.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
+
+	log.Printf("[AddSCIDToIndex] Starting - Committing RAM SCID sort to disk storage...")
+	indexer.Backend.StoreRAMDBInput(treenames, testdb)
+	log.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
 
 	return err
 }
