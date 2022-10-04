@@ -111,6 +111,53 @@ func (indexer *Indexer) StartDaemonMode() {
 		storedindex = indexer.ChainHeight
 	}
 
+	for _, vi := range hardcodedscids {
+		if scidExist(indexer.ValidatedSCs, vi) {
+			// Hardcoded SCID already exists, no need to re-add
+			continue
+		}
+
+		scVars, scCode, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight)
+
+		var contains bool
+
+		// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+		if indexer.SearchFilter == "" {
+			contains = true
+		} else {
+			// Ensure scCode is not blank (e.g. an invalid scid)
+			if scCode != "" {
+				contains = strings.Contains(scCode, indexer.SearchFilter)
+			}
+		}
+
+		if contains {
+			//log.Printf("[AddSCIDToIndex] Hardcoded SCID matches search filter. Adding SCID %v", vi)
+			indexer.Lock()
+			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
+			indexer.Unlock()
+			writeWait, _ := time.ParseDuration("50ms")
+			for indexer.Backend.Writing == 1 {
+				//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+			indexer.Backend.Writing = 1
+			err = indexer.Backend.StoreOwner(vi, "")
+			if err != nil {
+				log.Printf("[StartDaemonMode-hardcodedscids] Error storing owner: %v\n", err)
+			}
+			err = indexer.Backend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight)
+			if err != nil {
+				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v\n", err)
+			}
+			err = indexer.Backend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight)
+			if err != nil {
+				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v\n", err)
+			}
+			indexer.Backend.Writing = 0
+		}
+	}
+
 	if storedindex > indexer.LastIndexedHeight {
 		log.Printf("[StartDaemonMode-storedIndex] Continuing from last indexed height %v\n", storedindex)
 		indexer.Lock()
@@ -203,53 +250,6 @@ func (indexer *Indexer) StartDaemonMode() {
 					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
 				}
 			}
-		}
-	}
-
-	for _, vi := range hardcodedscids {
-		if scidExist(indexer.ValidatedSCs, vi) {
-			// Hardcoded SCID already exists, no need to re-add
-			continue
-		}
-
-		scVars, scCode, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight)
-
-		var contains bool
-
-		// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-		if indexer.SearchFilter == "" {
-			contains = true
-		} else {
-			// Ensure scCode is not blank (e.g. an invalid scid)
-			if scCode != "" {
-				contains = strings.Contains(scCode, indexer.SearchFilter)
-			}
-		}
-
-		if contains {
-			//log.Printf("[AddSCIDToIndex] Hardcoded SCID matches search filter. Adding SCID %v", vi)
-			indexer.Lock()
-			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
-			indexer.Unlock()
-			writeWait, _ := time.ParseDuration("50ms")
-			for indexer.Backend.Writing == 1 {
-				//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-				time.Sleep(writeWait)
-			}
-			indexer.Backend.Writing = 1
-			err = indexer.Backend.StoreOwner(vi, "")
-			if err != nil {
-				log.Printf("[StartDaemonMode-hardcodedscids] Error storing owner: %v\n", err)
-			}
-			err = indexer.Backend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight)
-			if err != nil {
-				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v\n", err)
-			}
-			err = indexer.Backend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight)
-			if err != nil {
-				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v\n", err)
-			}
-			indexer.Backend.Writing = 0
 		}
 	}
 
