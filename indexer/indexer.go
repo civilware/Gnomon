@@ -440,7 +440,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			// Check if already validated
-			if scidExist(indexer.ValidatedSCs, scid) {
+			if scidExist(indexer.ValidatedSCs, scid) || indexer.Closing {
 				//log.Printf("[AddSCIDToIndex] SCID '%v' already in validated list.", scid)
 				wg.Done()
 
@@ -476,6 +476,10 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 						for indexer.Backend.Writing == 1 {
 							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
+						}
+						if indexer.Closing {
+							wg.Done()
+							return
 						}
 						indexer.Backend.Writing = 1
 						if fsi != nil {

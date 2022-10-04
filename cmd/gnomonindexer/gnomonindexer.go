@@ -184,7 +184,7 @@ func main() {
 
 	// Database
 	var Graviton_backend *storage.GravitonStore
-	if fastsync || ramstore {
+	if ramstore {
 		Graviton_backend = storage.NewGravDBRAM("25ms")
 	} else {
 		var shasum string

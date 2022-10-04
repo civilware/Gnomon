@@ -169,7 +169,7 @@ func runGnomonIndexer(derodendpoint string) {
 	for {
 		if len(gnomonIndexes) == 0 || defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
 			log.Printf("[runGnomonIndexer] Waiting on gnomonIndexes or defaultIndexer... (%v / %v) - len(%v)", defaultIndexer.LastIndexedHeight, defaultIndexer.ChainHeight, len(gnomonIndexes))
-			time.Sleep(45 * time.Second)
+			time.Sleep(5 * time.Second)
 		} else {
 			break
 		}
