@@ -1357,6 +1357,8 @@ func (g *GravitonStore) StoreRAMDBInput(treenames []string, ramdb *GravitonStore
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
 	}
 
+	// Build set of grav trees to commit at once after being processed from ram store.
+	var commitTrees []*graviton.Tree
 	for _, v := range treenames {
 		store = g.DB
 		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
@@ -1393,12 +1395,14 @@ func (g *GravitonStore) StoreRAMDBInput(treenames []string, ramdb *GravitonStore
 			}
 		}
 
-		//log.Printf("[StoreRAMDBInput] Committing storage tree '%v'", v)
-		_, cerr := graviton.Commit(tree)
-		if cerr != nil {
-			log.Printf("[Graviton] ERROR: %v", cerr)
-			return cerr
-		}
+		commitTrees = append(commitTrees, tree)
+	}
+
+	// Commit all changed trees at once (single snapshot rather than many)
+	_, cerr := graviton.Commit(commitTrees...)
+	if cerr != nil {
+		log.Printf("[Graviton] ERROR: %v", cerr)
+		return cerr
 	}
 
 	return nil
