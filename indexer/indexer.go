@@ -137,7 +137,7 @@ func (indexer *Indexer) StartDaemonMode() {
 			indexer.ValidatedSCs = append(indexer.ValidatedSCs, vi)
 			indexer.Unlock()
 			writeWait, _ := time.ParseDuration("50ms")
-			for indexer.Backend.Writing == 1 {
+			for indexer.Backend.Writing == 1 || indexer.Closing {
 				//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
 				time.Sleep(writeWait)
 			}
@@ -276,7 +276,7 @@ func (indexer *Indexer) StartDaemonMode() {
 						if indexer.Closing {
 							// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
 							writeWait, _ := time.ParseDuration("50ms")
-							for indexer.Backend.Writing == 1 {
+							for indexer.Backend.Writing == 1 || indexer.Closing {
 								//log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
 								time.Sleep(writeWait)
 							}
@@ -305,7 +305,7 @@ func (indexer *Indexer) StartDaemonMode() {
 								if indexer.Closing {
 									// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
 									writeWait, _ := time.ParseDuration("50ms")
-									for indexer.Backend.Writing == 1 {
+									for indexer.Backend.Writing == 1 || indexer.Closing {
 										//log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
 										time.Sleep(writeWait)
 									}
@@ -356,7 +356,7 @@ func (indexer *Indexer) StartDaemonMode() {
 
 			// If we do concurrent blocks in the future, this will need to move/be modified to be *after* all concurrent blocks are done incase exit etc.
 			writeWait, _ := time.ParseDuration("50ms")
-			for indexer.Backend.Writing == 1 {
+			for indexer.Backend.Writing == 1 || indexer.Closing {
 				//log.Printf("[StartDaemonMode-indexBlockgofunc] GravitonDB is writing... sleeping for %v...", writeWait)
 				time.Sleep(writeWait)
 			}
@@ -478,7 +478,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
 						indexer.Unlock()
 						writeWait, _ := time.ParseDuration("10ms")
-						for indexer.Backend.Writing == 1 {
+						for indexer.Backend.Writing == 1 || indexer.Closing {
 							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
@@ -597,7 +597,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		}
 
 		writeWait, _ := time.ParseDuration("50ms")
-		for Graviton_backend.Writing == 1 {
+		for Graviton_backend.Writing == 1 || indexer.Closing {
 			//log.Printf("[Indexer-indexBlock-storeminiblockdetails] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
@@ -701,7 +701,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						for _, v := range output.Txs[0].Ring[j] {
 							//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: tx_fees, Height: int64(bl.Height)})
 							writeWait, _ := time.ParseDuration("50ms")
-							for Graviton_backend.Writing == 1 {
+							for Graviton_backend.Writing == 1 || indexer.Closing {
 								//log.Printf("[Indexer-indexBlock-normTx-txLoop] GravitonDB is writing... sleeping for %v...", writeWait)
 								time.Sleep(writeWait)
 							}
@@ -726,7 +726,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		// Load from mem existing regTxCount and append new value
 		currRegTxCount := Graviton_backend.GetTxCount("registration")
 		writeWait, _ := time.ParseDuration("50ms")
-		for Graviton_backend.Writing == 1 {
+		for Graviton_backend.Writing == 1 || indexer.Closing {
 			//log.Printf("[Indexer-indexBlock-regTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
@@ -742,7 +742,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		// Load from mem existing burnTxCount and append new value
 		currBurnTxCount := Graviton_backend.GetTxCount("burn")
 		writeWait, _ := time.ParseDuration("50ms")
-		for Graviton_backend.Writing == 1 {
+		for Graviton_backend.Writing == 1 || indexer.Closing {
 			//log.Printf("[Indexer-indexBlock-burnTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
@@ -815,7 +815,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 		// Load from mem existing normTxCount and append new value
 		currNormTxCount := Graviton_backend.GetTxCount("normal")
 		writeWait, _ := time.ParseDuration("50ms")
-		for Graviton_backend.Writing == 1 {
+		for Graviton_backend.Writing == 1 || indexer.Closing {
 			//log.Printf("[Indexer-indexBlock-normTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
@@ -866,7 +866,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						indexer.Unlock()
 
 						writeWait, _ := time.ParseDuration("50ms")
-						for Graviton_backend.Writing == 1 {
+						for Graviton_backend.Writing == 1 || indexer.Closing {
 							//log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
@@ -891,7 +891,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 					} else {
 						log.Printf("[indexBlock] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("50ms")
-						for Graviton_backend.Writing == 1 {
+						for Graviton_backend.Writing == 1 || indexer.Closing {
 							//log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
@@ -914,7 +914,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						indexer.Unlock()
 
 						writeWait, _ := time.ParseDuration("50ms")
-						for Graviton_backend.Writing == 1 {
+						for Graviton_backend.Writing == 1 || indexer.Closing {
 							//log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
@@ -938,7 +938,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						//log.Printf("Tx %v matches scinvoke call filter(s). Adding %v to DB.\n", bl_sctxs[i].Txid, currsctx)
 
 						writeWait, _ := time.ParseDuration("50ms")
-						for Graviton_backend.Writing == 1 {
+						for Graviton_backend.Writing == 1 || indexer.Closing {
 							//log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
@@ -1056,7 +1056,7 @@ func (indexer *Indexer) getInfo() {
 					var structureGetInfo *structures.GetInfo
 					structureGetInfo = info
 					writeWait, _ := time.ParseDuration("50ms")
-					for indexer.Backend.Writing == 1 {
+					for indexer.Backend.Writing == 1 || indexer.Closing {
 						//log.Printf("[Indexer-getInfo] GravitonDB is writing... sleeping for %v...", writeWait)
 						time.Sleep(writeWait)
 					}
@@ -1087,7 +1087,7 @@ func (indexer *Indexer) getInfo() {
 			var structureGetInfo *structures.GetInfo
 			structureGetInfo = info
 			writeWait, _ := time.ParseDuration("50ms")
-			for indexer.Backend.Writing == 1 {
+			for indexer.Backend.Writing == 1 || indexer.Closing {
 				//log.Printf("[Indexer-getInfo] GravitonDB is writing... sleeping for %v...", writeWait)
 				time.Sleep(writeWait)
 			}

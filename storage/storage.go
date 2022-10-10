@@ -155,7 +155,7 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 		return topoheight
 	}
 
-	log.Printf("[GetLastIndexHeight] No last index height. Starting from 0\n")
+	log.Printf("[GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled\n")
 
 	return 0
 }

@@ -132,6 +132,9 @@ func (apiServer *ApiServer) collectStats() {
 	var scinstalls []*structures.SCTXParse
 	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
 	for k, _ := range sclist {
+		if apiServer.Backend.Closing {
+			return
+		}
 		invokedetails := apiServer.Backend.GetAllSCIDInvokeDetails(k)
 		i := 0
 		for _, v := range invokedetails {
