@@ -164,7 +164,7 @@ func runGnomonIndexer(derodendpoint string) {
 	var Graviton_backend *storage.GravitonStore
 	Graviton_backend = storage.NewGravDBRAM("25ms")
 	defaultIndexer := indexer.NewIndexer(Graviton_backend, "", int64(1), derodendpoint, "daemon", false, false, true)
-	go defaultIndexer.StartDaemonMode()
+	defaultIndexer.StartDaemonMode()
 
 	for {
 		if len(gnomonIndexes) == 0 || defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
