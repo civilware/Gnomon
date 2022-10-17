@@ -272,7 +272,7 @@ func (indexer *Indexer) StartDaemonMode() {
 			if err != nil {
 				// Handle pruned nodes index errors... find height that they have blocks able to be indexed
 				//log.Printf("Checking if strings contain: %v", err.Error())
-				if strings.Contains(err.Error(), "err occured empty block") {
+				if strings.Contains(err.Error(), "err occured empty block") || strings.Contains(err.Error(), "err occured file does not exist") {
 					currIndex := indexer.LastIndexedHeight
 					rewindIndex := int64(0)
 					for {
