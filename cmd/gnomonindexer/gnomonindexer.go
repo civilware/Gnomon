@@ -64,7 +64,9 @@ var sslenabled bool
 var closeondisconnect bool
 var fastsync bool
 var ramstore bool
-var search_filter string
+var search_filter []string
+var csearch_filter string
+var sf_separator string
 var mbl bool
 var version = "0.1a"
 
@@ -74,6 +76,9 @@ var Gnomon = &GnomonServer{}
 
 func main() {
 	var err error
+
+	// TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
+	sf_separator = ";;;"
 
 	n := runtime.NumCPU()
 	runtime.GOMAXPROCS(n)
@@ -138,7 +143,8 @@ func main() {
 	}
 
 	if arguments["--search-filter"] != nil {
-		search_filter = arguments["--search-filter"].(string)
+		search_filter_nonarr := arguments["--search-filter"].(string)
+		search_filter = strings.Split(search_filter_nonarr, sf_separator)
 		log.Printf("[Main] Using search filter: %v\n", search_filter)
 	} else {
 		log.Printf("[Main] No search filter defined.. grabbing all.\n")
@@ -188,10 +194,11 @@ func main() {
 		Graviton_backend = storage.NewGravDBRAM("25ms")
 	} else {
 		var shasum string
-		if search_filter == "" {
+		if len(search_filter) == 0 {
 			shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
 		} else {
-			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(search_filter)))
+			csearch_filter = strings.Join(search_filter, sf_separator)
+			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(csearch_filter)))
 		}
 		db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
 		Graviton_backend = storage.NewGravDB(db_folder, "25ms")
@@ -226,7 +233,7 @@ func main() {
 	default:
 		go defaultIndexer.StartDaemonMode()
 	}
-	Gnomon.Indexers[search_filter] = defaultIndexer
+	Gnomon.Indexers[csearch_filter] = defaultIndexer
 
 	// Readline GNOMON
 	RLI, err = readline.NewEx(&readline.Config{
@@ -363,6 +370,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case command == "new_sf":
 			if len(line_parts) >= 2 {
 				nsf := strings.Join(line_parts[1:], " ")
+				nsf_j := strings.Split(nsf, sf_separator)
 				log.Printf("Adding new searchfilter '%v'\n", nsf)
 
 				// Database
@@ -378,7 +386,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
+				nIndexer := indexer.NewIndexer(nBackend, nsf_j, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
 				go nIndexer.StartDaemonMode()
 				g.Indexers[nsf] = nIndexer
 			}

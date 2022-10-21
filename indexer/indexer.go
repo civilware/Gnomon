@@ -36,7 +36,7 @@ type Client struct {
 type Indexer struct {
 	LastIndexedHeight int64
 	ChainHeight       int64
-	SearchFilter      string
+	SearchFilter      []string
 	Backend           *storage.GravitonStore
 	Closing           bool
 	RPC               *Client
@@ -64,7 +64,7 @@ var Connected bool = false
 
 var chain_topoheight int64
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool) *Indexer {
 	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
 
 	return &Indexer{
@@ -122,12 +122,18 @@ func (indexer *Indexer) StartDaemonMode() {
 		var contains bool
 
 		// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-		if indexer.SearchFilter == "" {
+		if len(indexer.SearchFilter) == 0 {
 			contains = true
 		} else {
 			// Ensure scCode is not blank (e.g. an invalid scid)
 			if scCode != "" {
-				contains = strings.Contains(scCode, indexer.SearchFilter)
+				for _, sfv := range indexer.SearchFilter {
+					contains = strings.Contains(scCode, sfv)
+					if contains {
+						// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+						break
+					}
+				}
 			}
 		}
 
@@ -469,29 +475,36 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				var contains bool
 
 				// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-				if indexer.SearchFilter == "" {
+				if len(indexer.SearchFilter) == 0 {
 					contains = true
 				} else {
 					// Ensure scCode is not blank (e.g. an invalid scid)
 					if scCode != "" {
-						contains = strings.Contains(scCode, indexer.SearchFilter)
+						for _, sfv := range indexer.SearchFilter {
+							contains = strings.Contains(scCode, sfv)
+							if contains {
+								// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+								break
+							}
+						}
 					}
 				}
 
 				if contains {
 					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 					if len(scVars) > 0 {
+						indexer.Lock()
+						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
+						indexer.Unlock()
 						if fsi != nil {
 							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
 						} else {
 							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
 						}
-						indexer.Lock()
-						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
-						indexer.Unlock()
 						writeWait, _ := time.ParseDuration("10ms")
-						for indexer.Backend.Writing == 1 {
+						for testdb.Writing == 1 {
 							if indexer.Closing {
+								wg.Done()
 								return
 							}
 							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
@@ -501,7 +514,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 							wg.Done()
 							return
 						}
-						indexer.Backend.Writing = 1
+						testdb.Writing = 1
 						if fsi != nil {
 							//err = indexer.Backend.StoreOwner(scid, fsi.Owner)
 							err = testdb.StoreOwner(scid, fsi.Owner)
@@ -528,7 +541,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 						if !scidExist(treenames, scid+"heights") {
 							treenames = append(treenames, scid+"heights")
 						}
-						indexer.Backend.Writing = 0
+						testdb.Writing = 0
 					} else {
 						log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", scid, indexer.ChainHeight)
 					}
@@ -540,6 +553,9 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	wg.Wait()
 
 	log.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
+	// TODO: Sometimes the RAM store does not properly take in all values and are missing some index SCs. To investigate...
+	//log.Printf("[AddSCIDToIndex] Current stored disk: %v", len(indexer.Backend.GetAllOwnersAndSCIDs()))
+	//log.Printf("[AddSCIDToIndex] Current stored ram: %v", len(testdb.GetAllOwnersAndSCIDs()))
 
 	log.Printf("[AddSCIDToIndex] Starting - Committing RAM SCID sort to disk storage...")
 	indexer.Backend.StoreRAMDBInput(treenames, testdb)
@@ -590,7 +606,7 @@ func (client *Client) Connect(endpoint string) (err error) {
 	return err
 }
 
-func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter string, mbl bool, Graviton_backend *storage.GravitonStore) (err error) {
+func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter []string, mbl bool, Graviton_backend *storage.GravitonStore) (err error) {
 	var io rpc.GetBlock_Result
 	var ip = rpc.GetBlock_Params{Hash: blid}
 
@@ -875,10 +891,16 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 
 				// Temporary check - will need something more robust to code compare potentially all except InitializePrivate() with a given template file or other filter inputs.
 				//contains := strings.Contains(code, "200 STORE(\"somevar\", 1)")
-				if search_filter == "" {
+				if len(search_filter) == 0 {
 					contains = true
 				} else {
-					contains = strings.Contains(code, search_filter)
+					for _, sfv := range search_filter {
+						contains = strings.Contains(code, sfv)
+						if contains {
+							// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+							break
+						}
+					}
 				}
 
 				if !contains {

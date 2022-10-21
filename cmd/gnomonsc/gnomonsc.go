@@ -163,7 +163,7 @@ func runGnomonIndexer(derodendpoint string) {
 	log.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
 	var Graviton_backend *storage.GravitonStore
 	Graviton_backend = storage.NewGravDBRAM("25ms")
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, "", int64(1), derodendpoint, "daemon", false, false, true)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, nil, int64(1), derodendpoint, "daemon", false, false, true)
 	defaultIndexer.StartDaemonMode()
 
 	for {
