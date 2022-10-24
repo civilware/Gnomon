@@ -817,9 +817,23 @@ func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height 
 	case uint64:
 		for _, v := range variables {
 			switch cval := v.Value.(type) {
+			case float64:
+				if inpvar == uint64(cval) {
+					switch ckey := v.Key.(type) {
+					case float64:
+						keysuint64 = append(keysuint64, uint64(ckey))
+					case uint64:
+						keysuint64 = append(keysuint64, ckey)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						keysstring = append(keysstring, v.Key.(string))
+					}
+				}
 			case uint64:
 				if inpvar == cval {
 					switch ckey := v.Key.(type) {
+					case float64:
+						keysuint64 = append(keysuint64, uint64(ckey))
 					case uint64:
 						keysuint64 = append(keysuint64, ckey)
 					default:
@@ -837,6 +851,8 @@ func (g *GravitonStore) GetSCIDKeysByValue(scid string, val interface{}, height 
 			case string:
 				if inpvar == cval {
 					switch ckey := v.Key.(type) {
+					case float64:
+						keysuint64 = append(keysuint64, uint64(ckey))
 					case uint64:
 						keysuint64 = append(keysuint64, ckey)
 					default:
@@ -869,9 +885,23 @@ func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height 
 	case uint64:
 		for _, v := range variables {
 			switch ckey := v.Key.(type) {
+			case float64:
+				if inpvar == uint64(ckey) {
+					switch cval := v.Value.(type) {
+					case float64:
+						valuesuint64 = append(valuesuint64, uint64(cval))
+					case uint64:
+						valuesuint64 = append(valuesuint64, cval)
+					default:
+						// default just store as string. Keys should only ever be strings or uint64, however, but assume default to string
+						valuesstring = append(valuesstring, v.Value.(string))
+					}
+				}
 			case uint64:
 				if inpvar == ckey {
 					switch cval := v.Value.(type) {
+					case float64:
+						valuesuint64 = append(valuesuint64, uint64(cval))
 					case uint64:
 						valuesuint64 = append(valuesuint64, cval)
 					default:
@@ -889,6 +919,8 @@ func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height 
 			case string:
 				if inpvar == ckey {
 					switch cval := v.Value.(type) {
+					case float64:
+						valuesuint64 = append(valuesuint64, uint64(cval))
 					case uint64:
 						valuesuint64 = append(valuesuint64, cval)
 					default:

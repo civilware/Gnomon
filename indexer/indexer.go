@@ -1304,6 +1304,8 @@ func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable,
 			case uint64:
 				if inpvar == cval {
 					switch ckey := v.Key.(type) {
+					case float64:
+						keysuint64 = append(keysuint64, uint64(ckey))
 					case uint64:
 						keysuint64 = append(keysuint64, ckey)
 					default:
@@ -1321,6 +1323,8 @@ func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable,
 			case string:
 				if inpvar == cval {
 					switch ckey := v.Key.(type) {
+					case float64:
+						keysuint64 = append(keysuint64, uint64(ckey))
 					case uint64:
 						keysuint64 = append(keysuint64, ckey)
 					default:
@@ -1354,6 +1358,8 @@ func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable,
 			case uint64:
 				if inpvar == ckey {
 					switch cval := v.Value.(type) {
+					case float64:
+						valuesuint64 = append(valuesuint64, uint64(cval))
 					case uint64:
 						valuesuint64 = append(valuesuint64, cval)
 					default:
@@ -1371,6 +1377,8 @@ func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable,
 			case string:
 				if inpvar == ckey {
 					switch cval := v.Value.(type) {
+					case float64:
+						valuesuint64 = append(valuesuint64, uint64(cval))
 					case uint64:
 						valuesuint64 = append(valuesuint64, cval)
 					default:
@@ -1393,6 +1401,8 @@ func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable,
 func (indexer *Indexer) ConvertSCIDKeys(variables []*structures.SCIDVariable) (keysstring []string, keysuint64 []uint64) {
 	for _, v := range variables {
 		switch ckey := v.Key.(type) {
+		case float64:
+			keysuint64 = append(keysuint64, uint64(ckey))
 		case uint64:
 			keysuint64 = append(keysuint64, ckey)
 		default:
@@ -1408,6 +1418,8 @@ func (indexer *Indexer) ConvertSCIDKeys(variables []*structures.SCIDVariable) (k
 func (indexer *Indexer) ConvertSCIDValues(variables []*structures.SCIDVariable) (valuesstring []string, valuesuint64 []uint64) {
 	for _, v := range variables {
 		switch cval := v.Value.(type) {
+		case float64:
+			valuesuint64 = append(valuesuint64, uint64(cval))
 		case uint64:
 			valuesuint64 = append(valuesuint64, cval)
 		default:

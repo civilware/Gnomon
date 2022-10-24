@@ -581,22 +581,18 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					log.Printf("- Indexer '%v'", ki)
 					sclist := vi.Backend.GetAllOwnersAndSCIDs()
 					var count int64
-					for k, v := range sclist {
+					for k, _ := range sclist {
 						if k == line_parts[1] {
 							var keysstringbyvalue []string
 							var keysuint64byvalue []uint64
-							log.Printf("SCID: %v ; Owner: %v\n", k, v)
 
-							if len(line_parts) > 3 {
-								checkHeight, err := strconv.Atoi(line_parts[3])
-								if err == nil && int64(checkHeight) > 0 && int64(checkHeight) <= vi.ChainHeight {
-									keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], int64(checkHeight), false)
-								} else {
-									keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
-								}
+							intCheck, err := strconv.Atoi(line_parts[2])
+							if err != nil {
+								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDKeysByValue(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
 							} else {
-								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDKeysByValue(k, uint64(intCheck), vi.ChainHeight, true)
 							}
+
 							for _, skey := range keysstringbyvalue {
 								log.Printf("%v\n", skey)
 							}
@@ -615,11 +611,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
 			}
 		case command == "listscidkey_byvaluelive":
-			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
 					var variables []*structures.SCIDVariable
-					keysstringbyvalue, keysuint64byvalue := vi.GetSCIDKeysByValue(variables, line_parts[1], line_parts[2], vi.ChainHeight)
+					var keysstringbyvalue []string
+					var keysuint64byvalue []uint64
+
+					intCheck, err := strconv.Atoi(line_parts[2])
+					if err != nil {
+						keysstringbyvalue, keysuint64byvalue = vi.GetSCIDKeysByValue(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
+					} else {
+						keysstringbyvalue, keysuint64byvalue = vi.GetSCIDKeysByValue(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
+					}
+
 					for _, skey := range keysstringbyvalue {
 						log.Printf("%v\n", skey)
 					}
@@ -638,22 +643,18 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					log.Printf("- Indexer '%v'", ki)
 					sclist := vi.Backend.GetAllOwnersAndSCIDs()
 					var count int64
-					for k, v := range sclist {
+					for k, _ := range sclist {
 						if k == line_parts[1] {
 							var valuesstringbykey []string
 							var valuesuint64bykey []uint64
-							log.Printf("SCID: %v ; Owner: %v\n", k, v)
 
-							if len(line_parts) > 3 {
-								checkHeight, err := strconv.Atoi(line_parts[3])
-								if err == nil && int64(checkHeight) > 0 && int64(checkHeight) <= vi.ChainHeight {
-									valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], int64(checkHeight), false)
-								} else {
-									valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
-								}
+							intCheck, err := strconv.Atoi(line_parts[2])
+							if err != nil {
+								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
 							} else {
-								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, line_parts[2], vi.ChainHeight, true)
+								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
 							}
+
 							for _, sval := range valuesstringbykey {
 								log.Printf("%v\n", sval)
 							}
@@ -672,11 +673,19 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				log.Printf("listscidkey_byvalue needs two values: single scid and value to match as arguments\n")
 			}
 		case command == "listscidvalue_bykeylive":
-			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
 					var variables []*structures.SCIDVariable
-					valuesstringbykey, valuesuint64bykey := vi.GetSCIDValuesByKey(variables, line_parts[1], line_parts[2], vi.ChainHeight)
+					var valuesstringbykey []string
+					var valuesuint64bykey []uint64
+
+					intCheck, err := strconv.Atoi(line_parts[2])
+					if err != nil {
+						valuesstringbykey, valuesuint64bykey = vi.GetSCIDValuesByKey(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
+					} else {
+						valuesstringbykey, valuesuint64bykey = vi.GetSCIDValuesByKey(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
+					}
 					for _, sval := range valuesstringbykey {
 						log.Printf("%v\n", sval)
 					}
