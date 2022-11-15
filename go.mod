@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/creachadair/jrpc2 v0.36.0
-	github.com/deroproject/derohe v0.0.0-20220610090545-ec5da1c381a9
+	github.com/deroproject/derohe v0.0.0-20221027103319-358fab62bdf4
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/gorilla/mux v1.8.0
@@ -25,6 +25,7 @@ require (
 	github.com/go-logr/zapr v1.2.3 // indirect
 	github.com/google/go-cmp v0.5.8 // indirect
 	github.com/hashicorp/golang-lru v0.5.4 // indirect
+	github.com/klauspost/compress v1.10.3 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.0.4 // indirect
 	github.com/klauspost/reedsolomon v1.9.9 // indirect
@@ -56,4 +57,5 @@ require (
 	golang.org/x/tools v0.1.5 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
+	nhooyr.io/websocket v1.8.7 // indirect
 )

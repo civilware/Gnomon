@@ -33,6 +33,14 @@ type Client struct {
 	sync.RWMutex
 }
 
+type SCIDToIndexStage struct {
+	scid     string
+	fsi      *structures.FastSyncImport
+	scVars   []*structures.SCIDVariable
+	scCode   string
+	contains bool
+}
+
 type Indexer struct {
 	LastIndexedHeight int64
 	ChainHeight       int64
@@ -455,8 +463,11 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	var wg sync.WaitGroup
 	wg.Add(len(scidstoadd))
 
+	var scilock sync.RWMutex
+	var scidstoindexstage []SCIDToIndexStage
+
 	log.Printf("[AddSCIDToIndex] Starting - Sorting %v SCIDs to index", len(scidstoadd))
-	testdb := storage.NewGravDBRAM("25ms")
+	tempdb := storage.NewGravDBRAM("25ms")
 	var treenames []string
 	// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
 	treenames = append(treenames, "owner")
@@ -468,6 +479,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				wg.Done()
 
 				return
+				//continue
 			} else {
 				// Validate SCID is *actually* a valid SCID
 				scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
@@ -490,76 +502,92 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 					}
 				}
 
-				if contains {
-					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
-					if len(scVars) > 0 {
-						indexer.Lock()
-						indexer.ValidatedSCs = append(indexer.ValidatedSCs, scid)
-						indexer.Unlock()
-						if fsi != nil {
-							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
-						} else {
-							//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
-						}
-						writeWait, _ := time.ParseDuration("10ms")
-						for testdb.Writing == 1 {
-							if indexer.Closing {
-								wg.Done()
-								return
-							}
-							//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-							time.Sleep(writeWait)
-						}
-						if indexer.Closing {
-							wg.Done()
-							return
-						}
-						testdb.Writing = 1
-						if fsi != nil {
-							//err = indexer.Backend.StoreOwner(scid, fsi.Owner)
-							err = testdb.StoreOwner(scid, fsi.Owner)
-						} else {
-							//err = indexer.Backend.StoreOwner(scid, "")
-							err = testdb.StoreOwner(scid, "")
-						}
-						if err != nil {
-							log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
-						}
-						//err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
-						err = testdb.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
-						if err != nil {
-							log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
-						}
-						if !scidExist(treenames, scid+"vars") {
-							treenames = append(treenames, scid+"vars")
-						}
-						//err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
-						err = testdb.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
-						if err != nil {
-							log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
-						}
-						if !scidExist(treenames, scid+"heights") {
-							treenames = append(treenames, scid+"heights")
-						}
-						testdb.Writing = 0
-					} else {
-						log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", scid, indexer.ChainHeight)
-					}
-				}
+				scilock.Lock()
+				scidstoindexstage = append(scidstoindexstage, SCIDToIndexStage{scid: scid, fsi: fsi, scVars: scVars, scCode: scCode, contains: contains})
+				scilock.Unlock()
 			}
 			wg.Done()
 		}(scid, fsi)
 	}
 	wg.Wait()
 
+	for _, v := range scidstoindexstage {
+		if v.contains {
+			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
+			if len(v.scVars) > 0 {
+				indexer.Lock()
+				indexer.ValidatedSCs = append(indexer.ValidatedSCs, v.scid)
+				indexer.Unlock()
+				if v.fsi != nil {
+					//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", scid, fsi.Owner)
+				} else {
+					//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
+				}
+				writeWait, _ := time.ParseDuration("10ms")
+				//for indexer.Backend.Writing == 1 {
+				for tempdb.Writing == 1 {
+					if indexer.Closing {
+						wg.Done()
+						return
+						//continue
+					}
+					//log.Printf("[AddSCIDToIndex] GravitonDB is writing... sleeping for %v...", writeWait)
+					time.Sleep(writeWait)
+				}
+				if indexer.Closing {
+					wg.Done()
+					return
+					//continue
+				}
+				//indexer.Backend.Writing = 1
+				tempdb.Writing = 1
+				if v.fsi != nil {
+					//err = indexer.Backend.StoreOwner(scid, fsi.Owner)
+					err = tempdb.StoreOwner(v.scid, v.fsi.Owner)
+				} else {
+					//err = indexer.Backend.StoreOwner(scid, "")
+					err = tempdb.StoreOwner(v.scid, "")
+				}
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
+				}
+				//err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
+				err = tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight)
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
+				}
+				if !scidExist(treenames, v.scid+"vars") {
+					treenames = append(treenames, v.scid+"vars")
+				}
+				//err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
+				err = tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight)
+				if err != nil {
+					log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+				}
+				if !scidExist(treenames, v.scid+"heights") {
+					treenames = append(treenames, v.scid+"heights")
+				}
+				//indexer.Backend.Writing = 0
+				tempdb.Writing = 0
+			} else {
+				log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v.scid, indexer.ChainHeight)
+			}
+		}
+	}
+	//wg.Done()
+	//}(scid, fsi)
+	//}
+	//wg.Wait()
+
 	log.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
 	// TODO: Sometimes the RAM store does not properly take in all values and are missing some index SCs. To investigate...
-	//log.Printf("[AddSCIDToIndex] Current stored disk: %v", len(indexer.Backend.GetAllOwnersAndSCIDs()))
-	//log.Printf("[AddSCIDToIndex] Current stored ram: %v", len(testdb.GetAllOwnersAndSCIDs()))
+	log.Printf("[AddSCIDToIndex] Current stored disk: %v", len(indexer.Backend.GetAllOwnersAndSCIDs()))
+	log.Printf("[AddSCIDToIndex] Current stored ram: %v", len(tempdb.GetAllOwnersAndSCIDs()))
 
 	log.Printf("[AddSCIDToIndex] Starting - Committing RAM SCID sort to disk storage...")
-	indexer.Backend.StoreRAMDBInput(treenames, testdb)
+	indexer.Backend.StoreRAMDBInput(treenames, tempdb)
 	log.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
+	log.Printf("[AddSCIDToIndex] New stored disk: %v", len(indexer.Backend.GetAllOwnersAndSCIDs()))
 
 	return err
 }
@@ -905,14 +933,14 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 
 				if !contains {
 					// Then reject the validation that this is an installsc action and move on
-					log.Printf("[indexBlock] SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
+					log.Printf("[indexBlock-installsc] SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
 					scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, topoheight)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
-						log.Printf("[indexBlock] SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
+						log.Printf("[indexBlock-installsc] SCID matches search filter. Adding SCID %v / Signer %v\n", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						indexer.Lock()
 						indexer.ValidatedSCs = append(indexer.ValidatedSCs, bl_sctxs[i].Scid)
 						indexer.Unlock()
@@ -928,12 +956,12 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 						Graviton_backend.Writing = 1
 						err = Graviton_backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						if err != nil {
-							log.Printf("[indexBlock] Error storing owner: %v\n", err)
+							log.Printf("[indexBlock-installsc] Error storing owner: %v\n", err)
 						}
 
 						err = Graviton_backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
 						if err != nil {
-							log.Printf("[indexBlock] Err storing invoke details. Err: %v\n", err)
+							log.Printf("[indexBlock-installsc] Err storing invoke details. Err: %v\n", err)
 							time.Sleep(5 * time.Second)
 							return err
 						}
@@ -944,7 +972,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
 					} else {
-						log.Printf("[indexBlock] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
+						log.Printf("[indexBlock-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("50ms")
 						for Graviton_backend.Writing == 1 {
 							if indexer.Closing {
