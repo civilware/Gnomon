@@ -479,7 +479,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				wg.Done()
 
 				return
-				//continue
 			} else {
 				// Validate SCID is *actually* a valid SCID
 				scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
@@ -524,12 +523,10 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 					//log.Printf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", scid)
 				}
 				writeWait, _ := time.ParseDuration("10ms")
-				//for indexer.Backend.Writing == 1 {
 				for tempdb.Writing == 1 {
 					if indexer.Closing {
 						wg.Done()
 						return
-						//continue
 					}
 					//log.Printf("[AddSCIDToIndex] GravitonDB is writing... sleeping for %v...", writeWait)
 					time.Sleep(writeWait)
@@ -537,21 +534,16 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				if indexer.Closing {
 					wg.Done()
 					return
-					//continue
 				}
-				//indexer.Backend.Writing = 1
 				tempdb.Writing = 1
 				if v.fsi != nil {
-					//err = indexer.Backend.StoreOwner(scid, fsi.Owner)
 					err = tempdb.StoreOwner(v.scid, v.fsi.Owner)
 				} else {
-					//err = indexer.Backend.StoreOwner(scid, "")
 					err = tempdb.StoreOwner(v.scid, "")
 				}
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
 				}
-				//err = indexer.Backend.StoreSCIDVariableDetails(scid, scVars, indexer.ChainHeight)
 				err = tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight)
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
@@ -559,7 +551,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				if !scidExist(treenames, v.scid+"vars") {
 					treenames = append(treenames, v.scid+"vars")
 				}
-				//err = indexer.Backend.StoreSCIDInteractionHeight(scid, indexer.ChainHeight)
 				err = tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight)
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
@@ -567,17 +558,12 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				if !scidExist(treenames, v.scid+"heights") {
 					treenames = append(treenames, v.scid+"heights")
 				}
-				//indexer.Backend.Writing = 0
 				tempdb.Writing = 0
 			} else {
 				log.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v.scid, indexer.ChainHeight)
 			}
 		}
 	}
-	//wg.Done()
-	//}(scid, fsi)
-	//}
-	//wg.Wait()
 
 	log.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
 	// TODO: Sometimes the RAM store does not properly take in all values and are missing some index SCs. To investigate...
@@ -585,7 +571,19 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	log.Printf("[AddSCIDToIndex] Current stored ram: %v", len(tempdb.GetAllOwnersAndSCIDs()))
 
 	log.Printf("[AddSCIDToIndex] Starting - Committing RAM SCID sort to disk storage...")
+	writeWait, _ := time.ParseDuration("10ms")
+	for tempdb.Writing == 1 || indexer.Backend.Writing == 1 {
+		if indexer.Closing {
+			return
+		}
+		log.Printf("[AddSCIDToIndex-StoreRAMDBInput] GravitonDB is writing... sleeping for %v...", writeWait)
+		time.Sleep(writeWait)
+	}
+	tempdb.Writing = 1
+	indexer.Backend.Writing = 1
 	indexer.Backend.StoreRAMDBInput(treenames, tempdb)
+	tempdb.Writing = 0
+	indexer.Backend.Writing = 0
 	log.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
 	log.Printf("[AddSCIDToIndex] New stored disk: %v", len(indexer.Backend.GetAllOwnersAndSCIDs()))
 
@@ -681,6 +679,8 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 	var wg sync.WaitGroup
 	wg.Add(len(bl.Tx_hashes))
 
+	var txslock sync.RWMutex
+
 	for i := 0; i < len(bl.Tx_hashes); i++ {
 		go func(i int) {
 			var tx transaction.Transaction
@@ -746,7 +746,9 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64, search_filter 
 					*/
 				}
 				//time.Sleep(2 * time.Second)
+				txslock.Lock()
 				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: bl.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Payloads: tx.Payloads, Fees: sc_fees, Height: topoheight})
+				txslock.Unlock()
 			} else if tx.TransactionType == transaction.REGISTRATION {
 				regTxCount++
 			} else if tx.TransactionType == transaction.BURN_TX {
