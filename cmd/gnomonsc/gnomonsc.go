@@ -27,7 +27,7 @@ var pollTime time.Duration
 var thAddition int64
 var gnomonIndexes []*structures.GnomonSCIDQuery
 var mux sync.Mutex
-var version = "0.1a"
+var version = "0.1.1"
 
 var command_line string = `Gnomon
 Gnomon SC Index Registration Service: As the Gnomon SCID owner, you can automatically poll your local gnomon instance for new SCIDs to append to the index SC
@@ -161,14 +161,13 @@ func runGnomonIndexer(derodendpoint string) {
 	mux.Lock()
 	defer mux.Unlock()
 	log.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
-	var Graviton_backend *storage.GravitonStore
-	Graviton_backend = storage.NewGravDBRAM("25ms")
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, nil, int64(1), derodendpoint, "daemon", false, false, true)
-	defaultIndexer.StartDaemonMode()
+	graviton_backend := storage.NewGravDBRAM("25ms")
+	defaultIndexer := indexer.NewIndexer(graviton_backend, nil, int64(1), derodendpoint, "daemon", false, false, true)
+	defaultIndexer.StartDaemonMode(1)
 
 	for {
-		if len(gnomonIndexes) == 0 || defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
-			log.Printf("[runGnomonIndexer] Waiting on gnomonIndexes or defaultIndexer... (%v / %v) - len(%v)", defaultIndexer.LastIndexedHeight, defaultIndexer.ChainHeight, len(gnomonIndexes))
+		if defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
+			log.Printf("[runGnomonIndexer] Waiting on defaultIndexer... (%v / %v)", defaultIndexer.LastIndexedHeight, defaultIndexer.ChainHeight)
 			time.Sleep(5 * time.Second)
 		} else {
 			break

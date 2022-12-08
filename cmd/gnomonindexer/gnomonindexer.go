@@ -51,34 +51,26 @@ Options:
   --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
-  --fastsync	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
-  --ramstore	True/false value to define if the db will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.`
+  --fastsync=<false>	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
+  --ramstore=<false>	True/false value to define if the db will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
+  --num-parallel-blocks=<5>	Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)`
 
 var Exit_In_Progress = make(chan bool)
 
-var daemon_endpoint string
-var api_endpoint string
-var api_ssl_endpoint string
-var get_info_ssl_endpoint string
-var sslenabled bool
 var closeondisconnect bool
 var fastsync bool
 var ramstore bool
-var search_filter []string
-var csearch_filter string
-var sf_separator string
-var mbl bool
-var version = "0.1a"
+var version = "0.1.1"
 
 var RLI *readline.Instance
 
 var Gnomon = &GnomonServer{}
 
+// TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
+const sf_separator = ";;;"
+
 func main() {
 	var err error
-
-	// TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
-	sf_separator = ";;;"
 
 	n := runtime.NumCPU()
 	runtime.GOMAXPROCS(n)
@@ -93,7 +85,7 @@ func main() {
 	}
 
 	// Set variables from arguments
-	daemon_endpoint = "127.0.0.1:40402"
+	daemon_endpoint := "127.0.0.1:40402"
 	if arguments["--daemon-rpc-address"] != nil {
 		daemon_endpoint = arguments["--daemon-rpc-address"].(string)
 	}
@@ -101,21 +93,22 @@ func main() {
 
 	log.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_endpoint)
 
-	api_endpoint = "127.0.0.1:8082"
+	api_endpoint := "127.0.0.1:8082"
 	if arguments["--api-address"] != nil {
 		api_endpoint = arguments["--api-address"].(string)
 	}
 
-	api_ssl_endpoint = "127.0.0.1:9092"
+	api_ssl_endpoint := "127.0.0.1:9092"
 	if arguments["--api-ssl-address"] != nil {
 		api_ssl_endpoint = arguments["--api-ssl-address"].(string)
 	}
 
-	get_info_ssl_endpoint = "127.0.0.1:9394"
+	get_info_ssl_endpoint := "127.0.0.1:9394"
 	if arguments["--get-info-ssl-address"] != nil {
 		get_info_ssl_endpoint = arguments["--get-info-ssl-address"].(string)
 	}
 
+	sslenabled := false
 	if arguments["--enable-api-ssl"] != nil {
 		sslenablestr := arguments["--enable-api-ssl"].(string)
 		if sslenablestr == "true" {
@@ -142,6 +135,7 @@ func main() {
 		}
 	}
 
+	var search_filter []string
 	if arguments["--search-filter"] != nil {
 		search_filter_nonarr := arguments["--search-filter"].(string)
 		search_filter = strings.Split(search_filter_nonarr, sf_separator)
@@ -150,6 +144,7 @@ func main() {
 		log.Printf("[Main] No search filter defined.. grabbing all.\n")
 	}
 
+	mbl := false
 	if arguments["--enable-miniblock-lookup"] != nil {
 		mbllookupstr := arguments["--enable-miniblock-lookup"].(string)
 		if mbllookupstr == "true" {
@@ -163,6 +158,14 @@ func main() {
 		}
 	}
 	Gnomon.MBLLookup = mbl
+
+	numParallelBlocks := 1
+	if arguments["--num-parallel-blocks"] != nil {
+		numParallelBlocks, err = strconv.Atoi(arguments["--num-parallel-blocks"].(string))
+		if err != nil {
+			log.Fatalf("[Main] ERR converting '%v' to int for --num-parallel-blocks.", arguments["--num-parllel-blocks"].(string))
+		}
+	}
 
 	// Edge flag to be able to close on disconnect from a daemon after x failures. Can be used for smaller nodes or other areas where you want the API to offline when no new data is ingested/indexed.
 	if arguments["--close-on-disconnect"] != nil {
@@ -190,6 +193,7 @@ func main() {
 
 	// Database
 	var Graviton_backend *storage.GravitonStore
+	var csearch_filter string
 	if ramstore {
 		Graviton_backend = storage.NewGravDBRAM("25ms")
 	} else {
@@ -227,11 +231,11 @@ func main() {
 
 	switch Gnomon.RunMode {
 	case "daemon":
-		go defaultIndexer.StartDaemonMode()
+		go defaultIndexer.StartDaemonMode(numParallelBlocks)
 	case "wallet":
 		go defaultIndexer.StartWalletMode("")
 	default:
-		go defaultIndexer.StartDaemonMode()
+		go defaultIndexer.StartDaemonMode(numParallelBlocks)
 	}
 	Gnomon.Indexers[csearch_filter] = defaultIndexer
 
@@ -275,7 +279,7 @@ func main() {
 			validatedSCIDs := Graviton_backend.GetAllOwnersAndSCIDs()
 			gnomon_count := int64(len(validatedSCIDs))
 
-			currheight := defaultIndexer.LastIndexedHeight - 1
+			currheight := defaultIndexer.LastIndexedHeight
 
 			// choose color based on urgency
 			color := "\033[32m" // default is green color
@@ -387,7 +391,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				// Start default indexer based on search_filter params
 				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
 				nIndexer := indexer.NewIndexer(nBackend, nsf_j, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
-				go nIndexer.StartDaemonMode()
+				go nIndexer.StartDaemonMode(1)
 				g.Indexers[nsf] = nIndexer
 			}
 		case command == "listsc_byowner":
@@ -710,10 +714,14 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					if len(keysstring) > 0 {
 						sigstr = keysstring[0]
 					}
-					validated, signer := vi.ValidateSCSignature(code, sigstr)
+					validated, signer, err := vi.ValidateSCSignature(code, sigstr)
 
-					log.Printf("Validated: %v", validated)
-					log.Printf("Signer: %v", signer)
+					if err != nil {
+						log.Printf("[validatesc] ERR - %v", err)
+					} else {
+						log.Printf("Validated: %v", validated)
+						log.Printf("Signer: %v", signer)
+					}
 					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
 					break
 				}
@@ -781,12 +789,26 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			}
 		case line == "status":
 			for ki, vi := range g.Indexers {
-				log.Printf("- Indexer '%v'", ki)
+				log.Printf("- Indexer '%v' - Generating status metrics...", ki)
 				validatedSCIDs := vi.Backend.GetAllOwnersAndSCIDs()
 				gnomon_count := int64(len(validatedSCIDs))
-				currheight := vi.LastIndexedHeight - 1
 
-				log.Printf("GNOMON [%d/%d] R:%d >>", currheight, vi.ChainHeight, gnomon_count)
+				regTxCount := vi.Backend.GetTxCount("registration")
+				burnTxCount := vi.Backend.GetTxCount("burn")
+				normTxCount := vi.Backend.GetTxCount("normal")
+
+				var scTxCount int64
+				for sc, _ := range validatedSCIDs {
+					scTxCount += int64(len(vi.Backend.GetAllSCIDInvokeDetails(sc)))
+				}
+
+				log.Printf("GNOMON [%d/%d] R:%d >>\n", vi.LastIndexedHeight, vi.ChainHeight, gnomon_count)
+				log.Printf("TXCOUNTS [%d/%d] R:%d B:%d N:%d S:%d >>\n", vi.LastIndexedHeight, vi.ChainHeight, regTxCount, burnTxCount, normTxCount, scTxCount)
+				if len(vi.SearchFilter) == 0 {
+					log.Printf("SEARCHFILTER(S) [%d/%d] >> %s\n", vi.LastIndexedHeight, vi.ChainHeight, "ALL SCs")
+				} else {
+					log.Printf("SEARCHFILTER(S) [%d/%d] >> %s\n", vi.LastIndexedHeight, vi.ChainHeight, strings.Join(vi.SearchFilter, ";;;"))
+				}
 			}
 		case line == "quit":
 			log.Printf("'quit' received, putting gnomes to sleep. This will take ~5sec.\n")

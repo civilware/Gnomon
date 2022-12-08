@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/deroproject/derohe/block"
-	"github.com/deroproject/derohe/blockchain"
 	"github.com/deroproject/derohe/config"
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
@@ -31,8 +30,6 @@ type Storetopofs struct {
 
 var Connected bool
 var DeroDB = &Derodbstore{}
-
-var chain *blockchain.Blockchain
 
 func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 	var ss *graviton.Snapshot

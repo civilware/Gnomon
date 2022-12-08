@@ -37,20 +37,20 @@ type TreeKV struct {
 // ---- Application Graviton/Backend functions ---- //
 // Builds new Graviton DB based on input from main()
 func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
-	var Graviton_backend *GravitonStore = &GravitonStore{}
+	var graviton_backend *GravitonStore = &GravitonStore{}
 
 	current_path, err := os.Getwd()
 	if err != nil {
 		log.Printf("%v\n", err)
 	}
 
-	Graviton_backend.DBMigrateWait, _ = time.ParseDuration(dbmigratewait)
+	graviton_backend.DBMigrateWait, _ = time.ParseDuration(dbmigratewait)
 
-	Graviton_backend.DBFolder = dbFolder
+	graviton_backend.DBFolder = dbFolder
 
-	Graviton_backend.DBPath = filepath.Join(current_path, dbFolder)
+	graviton_backend.DBPath = filepath.Join(current_path, dbFolder)
 
-	Graviton_backend.DB, err = graviton.NewDiskStore(Graviton_backend.DBPath)
+	graviton_backend.DB, err = graviton.NewDiskStore(graviton_backend.DBPath)
 	if err != nil {
 		log.Fatalf("[NewGravDB] Could not create db store: %v\n", err)
 	}
@@ -58,11 +58,11 @@ func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
 	// Incase we ever need to implement SwapGravDB - an array of dbtrees will be needed to cursor all data since it's at the tree level to ensure proper export/import
 	/*
 		for i := 0; i < len(dbtrees); i++ {
-			Graviton_backend.DBTrees = append(Graviton_backend.DBTrees, dbtrees[i])
+			graviton_backend.DBTrees = append(graviton_backend.DBTrees, dbtrees[i])
 		}
 	*/
 
-	return Graviton_backend
+	return graviton_backend
 }
 
 // Builds new Graviton DB based on input from main() RAM store
@@ -485,7 +485,7 @@ func idExist(s []string, str string) bool {
 func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.SCTXParse) error {
 	confBytes, err := json.Marshal(invokedetails)
 	if err != nil {
-		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v\n", err)
+		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v", err)
 	}
 
 	store := g.DB
@@ -631,7 +631,7 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signerPart 
 func (g *GravitonStore) StoreGetInfoDetails(getinfo *structures.GetInfo) error {
 	confBytes, err := json.Marshal(getinfo)
 	if err != nil {
-		return fmt.Errorf("[StoreGetInfoDetails] could not marshal getinfo info: %v\n", err)
+		return fmt.Errorf("[StoreGetInfoDetails] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -702,7 +702,7 @@ func (g *GravitonStore) GetGetInfoDetails() *structures.GetInfo {
 func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*structures.SCIDVariable, topoheight int64) error {
 	confBytes, err := json.Marshal(variables)
 	if err != nil {
-		return fmt.Errorf("[StoreSCIDVariableDetails] could not marshal getinfo info: %v\n", err)
+		return fmt.Errorf("[StoreSCIDVariableDetails] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -1155,7 +1155,7 @@ func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*s
 
 	confBytes, err := json.Marshal(mbldetails)
 	if err != nil {
-		return fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v\n", err)
+		return fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -1267,7 +1267,7 @@ func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
 
 	confBytes, err := json.Marshal(currCount)
 	if err != nil {
-		return fmt.Errorf("[StoreMiniblockCountByAddress] could not marshal getinfo info: %v\n", err)
+		return fmt.Errorf("[StoreMiniblockCountByAddress] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -1376,30 +1376,30 @@ func (g *GravitonStore) GetSCIDInteractionByAddr(addr string) (scids []string) {
 // ---- Start TEST Graviton/Backend functions ---- //
 
 // Writes to disk RAM-stored data
-func (g *GravitonStore) StoreRAMDBInput(treenames []string, ramdb *GravitonStore) (err error) {
-	store := g.DB
-	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
-	ramss, _ := ramdb.DB.LoadSnapshot(0)
+func (g *GravitonStore) StoreAltDBInput(treenames []string, altdb *GravitonStore) (err error) {
+	//store := g.DB
+	//ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+	altss, _ := altdb.DB.LoadSnapshot(0)
 
 	// Check for g.migrating, if so sleep for g.DBMigrateWait ms
 	for g.migrating == 1 {
-		log.Printf("[StoreRAMDBInput] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		log.Printf("[StoreAltDBInput] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
 		time.Sleep(g.DBMigrateWait)
-		store = g.DB
-		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
+		//store = g.DB
+		//ss, _ = store.LoadSnapshot(0) // load most recent snapshot
 	}
 
 	// Build set of grav trees to commit at once after being processed from ram store.
 	var commitTrees []*graviton.Tree
 	for _, v := range treenames {
-		store = g.DB
-		ss, _ = store.LoadSnapshot(0) // load most recent snapshot
-		//log.Printf("[StoreRAMDBInput] Getting storage tree '%v'", v)
+		store := g.DB
+		ss, _ := store.LoadSnapshot(0) // load most recent snapshot
+		//log.Printf("[StoreAltDBInput] Getting storage tree '%v'", v)
 		tree, _ := ss.GetTree(v)
 		// Catch/handle a nil tree. TODO: This should gracefully cause shutdown, if we cannot get the previous snapshot data. Also need to handle losing that snapshot, how do we handle.
 		if tree == nil {
 			var terr error
-			log.Printf("[Graviton-StoreRAMDBInput] ERROR: Tree is nil for '%v'. Attempting to rollback 1 snapshot\n", v)
+			log.Printf("[Graviton-StoreAltDBInput] ERROR: Tree is nil for '%v'. Attempting to rollback 1 snapshot\n", v)
 			prevss, _ := store.LoadSnapshot(ss.GetVersion() - 1)
 			tree, terr = prevss.GetTree(v)
 			if tree == nil {
@@ -1408,18 +1408,18 @@ func (g *GravitonStore) StoreRAMDBInput(treenames []string, ramdb *GravitonStore
 			}
 		}
 
-		//log.Printf("[StoreRAMDBInput] Getting RAM tree '%v'", v)
-		ramtree, _ := ramss.GetTree(v)
-		ramc := ramtree.Cursor()
-		var ramTreeKV []*TreeKV // Just rk & rv which are of type []byte
-		for rk, rv, err := ramc.First(); err == nil; rk, rv, err = ramc.Next() {
+		//log.Printf("[StoreAltDBInput] Getting RAM tree '%v'", v)
+		alttree, _ := altss.GetTree(v)
+		altc := alttree.Cursor()
+		var altTreeKV []*TreeKV // Just rk & rv which are of type []byte
+		for rk, rv, err := altc.First(); err == nil; rk, rv, err = altc.Next() {
 			temp := &TreeKV{rk, rv}
-			//log.Printf("[StoreRAMDBInput] Looping through ramtree cursor k: '%v'; v: '%v'", temp.k, temp.v)
-			ramTreeKV = append(ramTreeKV, temp)
+			//log.Printf("[StoreAltDBInput] Looping through ramtree cursor k: '%v'; v: '%v'", temp.k, temp.v)
+			altTreeKV = append(altTreeKV, temp)
 		}
 
-		//log.Printf("[StoreRAMDBInput] Looping through ramtree cursor output to input to storage tree. (%v)", len(ramTreeKV))
-		for _, val := range ramTreeKV {
+		//log.Printf("[StoreAltDBInput] Looping through ramtree cursor output to input to storage tree. (%v)", len(altTreeKV))
+		for _, val := range altTreeKV {
 			perr := tree.Put(val.k, val.v)
 			if perr != nil {
 				log.Printf("[Graviton] ERROR: %v", perr)
