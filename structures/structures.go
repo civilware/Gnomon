@@ -1,6 +1,8 @@
 package structures
 
 import (
+	"encoding/json"
+
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
 )
@@ -75,3 +77,16 @@ type SCIDInteractionHeight struct {
 }
 
 type GetInfo rpc.GetInfo_Result
+
+type JSONRpcReq struct {
+	Id     *json.RawMessage `json:"id"`
+	Method string           `json:"method"`
+	Params *json.RawMessage `json:"params"`
+}
+
+type JSONRpcResp struct {
+	Id      *json.RawMessage `json:"id"`
+	Version string           `json:"jsonrpc"`
+	Result  interface{}      `json:"result"`
+	Error   interface{}      `json:"error"`
+}
