@@ -19,6 +19,9 @@ import (
 	"github.com/civilware/Gnomon/mbllookup"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
+
+	"github.com/deroproject/derohe/cryptography/crypto"
+
 	"github.com/docopt/docopt-go"
 )
 
@@ -48,7 +51,7 @@ Options:
   --get-info-ssl-address=<127.0.0.1:9394>	Host GetInfo ssl api. This is to completely isolate it from gnomon api results as a whole. Normal api endpoints also surface the getinfo call if needed.
   --start-topoheight=<31170>	Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
-  --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
+  --runmode=<daemon>	Defines the runmode of gnomon (daemon/wallet/asset). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync=<false>	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
@@ -118,7 +121,7 @@ func main() {
 
 	Gnomon.RunMode = "daemon"
 	if arguments["--runmode"] != nil {
-		if arguments["--runmode"] == "daemon" || arguments["--runmode"] == "wallet" {
+		if arguments["--runmode"] == "daemon" || arguments["--runmode"] == "wallet" || arguments["--runmode"] == "asset" {
 			Gnomon.RunMode = arguments["--runmode"].(string)
 		} else {
 			log.Fatalf("ERR - Runmode must be either 'daemon' or 'wallet'")
@@ -234,6 +237,8 @@ func main() {
 		go defaultIndexer.StartDaemonMode(numParallelBlocks)
 	case "wallet":
 		go defaultIndexer.StartWalletMode("")
+	case "asset":
+		go defaultIndexer.StartDaemonMode(numParallelBlocks)
 	default:
 		go defaultIndexer.StartDaemonMode(numParallelBlocks)
 	}
@@ -419,7 +424,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				log.Printf("listsc_byowner needs a single owner address as argument\n")
 			}
 		case command == "listsc_byscid":
-			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+			if len(line_parts) >= 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
 					sclist := vi.Backend.GetAllOwnersAndSCIDs()
@@ -429,7 +434,27 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
 							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
 							for _, invoke := range invokedetails {
-								log.Printf("%v\n", invoke)
+								//log.Printf("%v\n", invoke)
+								if len(line_parts) == 3 {
+									ca, _ := strconv.Atoi(line_parts[2])
+									if invoke.Height >= int64(ca) {
+										log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
+										scVars := vi.Backend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], invoke.Height)
+										// TODO: Delete me - temp details for investigation
+										var tfvar []string
+										for _, vsv := range scVars {
+											if vsv.Key.(string) == "C" {
+												continue
+											}
+											if vsv.Key.(string) == "FlopCard1" || vsv.Key.(string) == "FlopCard2" || vsv.Key.(string) == "FlopCard3" || vsv.Key.(string) == "TurnCard" || vsv.Key.(string) == "RiverCard" {
+												tfvar = append(tfvar, fmt.Sprintf("k: %v, v: %v", vsv.Key, vsv.Value))
+											}
+										}
+										log.Printf("Vars: %v\n\n", tfvar)
+									}
+								} else {
+									log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
+								}
 							}
 							count++
 						}
@@ -522,7 +547,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
 					var count int64
 					for _, v := range indexbyentry {
-						log.Printf("%v", v)
+						//log.Printf("%v", v)
+						log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 						count++
 					}
 
@@ -542,12 +568,14 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for k, _ := range sclist {
 						indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
 						for _, v := range indexbyentry {
-							log.Printf("%v", v)
+							//log.Printf("%v", v)
+							log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							count++
 						}
 						indexbyentry2 := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
 						for _, v := range indexbyentry2 {
-							log.Printf("%v", v)
+							//log.Printf("%v", v)
+							log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							count2++
 						}
 					}
@@ -561,17 +589,23 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			}
 		case command == "listscinvoke_bysigner":
 			{
-				if len(line_parts) == 2 {
+				if len(line_parts) >= 2 {
 					for ki, vi := range g.Indexers {
 						log.Printf("- Indexer '%v'", ki)
 						sclist := vi.Backend.GetAllOwnersAndSCIDs()
 						for k, v := range sclist {
+							if len(line_parts) > 2 && len(line_parts[2]) == 64 {
+								if k != line_parts[2] {
+									continue
+								}
+							}
 							indexbypartialsigner := vi.Backend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
 							if len(indexbypartialsigner) > 0 {
 								log.Printf("SCID: %v ; Owner: %v\n", k, v)
 							}
 							for _, v := range indexbypartialsigner {
-								log.Printf("%v - %v", v.Height, v.Sc_args)
+								//log.Printf("%v - %v", v.Height, v.Sc_args)
+								log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							}
 						}
 					}
@@ -661,6 +695,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 							for _, sval := range valuesstringbykey {
 								log.Printf("%v\n", sval)
+
+								var h crypto.Hash
+								copy(h[:], []byte(sval)[:])
+								log.Printf("%v", h.String())
+								log.Printf("%v", []byte(sval))
 							}
 							for _, uval := range valuesuint64bykey {
 								log.Printf("%v\n", uval)
@@ -692,10 +731,17 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					for _, sval := range valuesstringbykey {
 						log.Printf("%v\n", sval)
+
+						// TOOD: Returning human readable string representation of a txid crypto.Hash returned from above. Perhaps a way to implement this to be discoverable based on length?
+						var h crypto.Hash
+						copy(h[:], []byte(sval)[:])
+						log.Printf("%v", h.String())
+						log.Printf("%v", []byte(sval))
 					}
 					for _, uval := range valuesuint64bykey {
 						log.Printf("%v\n", uval)
 					}
+
 					// TODO: We can break, it's using the daemon to return the results. TODO Could pass mainnet/testnet and check indexers for different endpoints on different chains etc. but may not be needed
 					break
 				}
@@ -734,6 +780,27 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					scidstoadd := make(map[string]*structures.FastSyncImport)
 					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
 					err = vi.AddSCIDToIndex(scidstoadd)
+					if err != nil {
+						log.Printf("Err - %v", err)
+					}
+				}
+			} else {
+				log.Printf("addscid_toindex needs 1 values: single scid to match as arguments\n")
+			}
+		case command == "index_txn":
+			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
+			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					log.Printf("- Indexer '%v'", ki)
+					scidstoadd := make(map[string]*structures.FastSyncImport)
+					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
+					//err = vi.AddSCIDToIndex(scidstoadd)
+					var blTxns *structures.BlockTxns
+					blTxns.Topoheight = 1352506
+					var h crypto.Hash
+					copy(h[:], []byte(line_parts[1])[:])
+					blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
+					vi.IndexTxn(blTxns)
 					if err != nil {
 						log.Printf("Err - %v", err)
 					}
@@ -833,21 +900,23 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
 	io.WriteString(w, "\t\033[1mversion\033[0m\t\tShow gnomon version\n")
 	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
-	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search, new_sf <searchfilterstring>\n")
+	io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid, listsc_byscid <scid>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed, listsc_byheight\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0, listsc_balances\n")
 	io.WriteString(w, "\t\033[1mlistsc_byentrypoint\033[0m\tLists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate()\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address, listscinvoke_bysigner <signerstring>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluestored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluelive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidvalue_bykeystored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidvalue_bykeystored <scid> <key>\n")
 	io.WriteString(w, "\t\033[1mlistscidvalue_bykeylive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidvalue_bykeylive <scid> <key>\n")
 	io.WriteString(w, "\t\033[1mvalidatesc\033[0m\tValidates a SC looking for a 'signature' k/v pair containing DERO signature validating the code matches the signature, validatesc <scid>\n")
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
+	//io.WriteString(w, "\t\033[1mindex_txn\033[0m\tIndex a specific txid (alpha), addscid_toindex <scid>\n")
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
+	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")

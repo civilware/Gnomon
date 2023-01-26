@@ -82,7 +82,8 @@ func NewGravDBRAM(dbmigratewait string) *GravitonStore {
 }
 
 // Stores gnomon's last indexed height - this is for stateful stores on close and reference on open
-func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
+func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -105,16 +106,19 @@ func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64) error {
 		tree, terr = prevss.GetTree("stats")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	tree.Put([]byte("lastindexedheight"), []byte(topoheight)) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets gnomon's last indexed height - this is for stateful stores on close and reference on open
@@ -161,7 +165,8 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 }
 
 // Stores gnomon's txcount by a given txType - this is for stateful stores on close and reference on open
-func (g *GravitonStore) StoreTxCount(count int64, txType string) error {
+func (g *GravitonStore) StoreTxCount(count int64, txType string, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -186,16 +191,19 @@ func (g *GravitonStore) StoreTxCount(count int64, txType string) error {
 		tree, terr = prevss.GetTree("stats")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	tree.Put([]byte(key), []byte(txCount)) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets gnomon's txcount by a given txType - this is for stateful stores on close and reference on open
@@ -242,7 +250,8 @@ func (g *GravitonStore) GetTxCount(txType string) int64 {
 }
 
 // Stores the owner (who deployed it) of a given scid
-func (g *GravitonStore) StoreOwner(scid string, owner string) error {
+func (g *GravitonStore) StoreOwner(scid string, owner string, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -263,16 +272,19 @@ func (g *GravitonStore) StoreOwner(scid string, owner string) error {
 		tree, terr = prevss.GetTree("owner")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	tree.Put([]byte(scid), []byte(owner)) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Returns the owner (who deployed it) of a given scid
@@ -342,7 +354,8 @@ func (g *GravitonStore) GetAllOwnersAndSCIDs() map[string]string {
 }
 
 // Stores all normal txs with SCIDs and their respective ring members for future balance/interaction reference
-func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID *structures.NormalTXWithSCIDParse) error {
+func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID *structures.NormalTXWithSCIDParse, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -364,7 +377,7 @@ func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID 
 		tree, terr = prevss.GetTree("normaltxwithscid")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := addr
@@ -384,7 +397,7 @@ func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID 
 				// Return nil if already exists in array.
 				// Clause for this is in event we pop backwards in time and already have this data stored.
 				// TODO: What if interaction happened on false-chain and pop to retain correct chain. Bad data may be stored here still, as it isn't removed. Need fix for this in future.
-				return nil
+				return tree, changes, nil
 			}
 		}
 
@@ -392,16 +405,19 @@ func (g *GravitonStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID 
 	}
 	newNormTxsWithSCID, err = json.Marshal(normTxsWithSCID)
 	if err != nil {
-		return fmt.Errorf("[Graviton] could not marshal normTxsWithSCID info: %v", err)
+		return tree, changes, fmt.Errorf("[Graviton] could not marshal normTxsWithSCID info: %v", err)
 	}
 
 	tree.Put([]byte(key), newNormTxsWithSCID)
-
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Returns all normal txs with SCIDs based on a given address
@@ -482,10 +498,11 @@ func idExist(s []string, str string) bool {
 }
 
 // Stores all scinvoke details of a given scid
-func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.SCTXParse) error {
+func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoint string, topoheight int64, invokedetails *structures.SCTXParse, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	confBytes, err := json.Marshal(invokedetails)
 	if err != nil {
-		return fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v", err)
+		return &graviton.Tree{}, changes, fmt.Errorf("[StoreInvokeDetails] could not marshal invokedetails info: %v", err)
 	}
 
 	store := g.DB
@@ -510,17 +527,20 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 		tree, terr = prevss.GetTree(scid)
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := signer + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
 	tree.Put([]byte(key), confBytes) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Returns all scinvoke calls from a given scid
@@ -628,10 +648,11 @@ func (g *GravitonStore) GetAllSCIDInvokeDetailsBySigner(scid string, signerPart 
 }
 
 // Stores simple getinfo polling from the daemon
-func (g *GravitonStore) StoreGetInfoDetails(getinfo *structures.GetInfo) error {
+func (g *GravitonStore) StoreGetInfoDetails(getinfo *structures.GetInfo, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	confBytes, err := json.Marshal(getinfo)
 	if err != nil {
-		return fmt.Errorf("[StoreGetInfoDetails] could not marshal getinfo info: %v", err)
+		return &graviton.Tree{}, changes, fmt.Errorf("[StoreGetInfoDetails] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -654,17 +675,20 @@ func (g *GravitonStore) StoreGetInfoDetails(getinfo *structures.GetInfo) error {
 		tree, terr = prevss.GetTree("getinfo")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := "getinfo"
 	tree.Put([]byte(key), confBytes) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Returns simple getinfo polling from the daemon
@@ -699,10 +723,11 @@ func (g *GravitonStore) GetGetInfoDetails() *structures.GetInfo {
 }
 
 // Stores SC variables at a given topoheight (called on any new scdeploy or scinvoke actions)
-func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*structures.SCIDVariable, topoheight int64) error {
+func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*structures.SCIDVariable, topoheight int64, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	confBytes, err := json.Marshal(variables)
 	if err != nil {
-		return fmt.Errorf("[StoreSCIDVariableDetails] could not marshal getinfo info: %v", err)
+		return &graviton.Tree{}, changes, fmt.Errorf("[StoreSCIDVariableDetails] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -726,17 +751,20 @@ func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*struc
 		tree, terr = prevss.GetTree(treename)
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := strconv.FormatInt(topoheight, 10)
 	tree.Put([]byte(key), confBytes) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets SC variables at a given topoheight
@@ -940,7 +968,8 @@ func (g *GravitonStore) GetSCIDValuesByKey(scid string, key interface{}, height 
 }
 
 // Stores SC interaction height and detail - height invoked upon and type (scinstall/scinvoke). This is separate tree & k/v since we can query it for other things at less data retrieval
-func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, height int64) error {
+func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, height int64, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -962,7 +991,7 @@ func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, height int64) er
 		tree, terr = prevss.GetTree(treename)
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := scid
@@ -982,23 +1011,26 @@ func (g *GravitonStore) StoreSCIDInteractionHeight(scid string, height int64) er
 				// Return nil if already exists in array.
 				// Clause for this is in event we pop backwards in time and already have this data stored.
 				// TODO: What if interaction happened on false-chain and pop to retain correct chain. Bad data may be stored here still, as it isn't removed. Need fix for this in future.
-				return nil
+				return tree, changes, nil
 			}
 		}
 		interactionHeight = append(interactionHeight, height)
 	}
 	newInteractionHeight, err = json.Marshal(interactionHeight)
 	if err != nil {
-		return fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
+		return tree, changes, fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
 	}
 
 	tree.Put([]byte(key), newInteractionHeight)
-
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets SC interaction height and detail by a given SCID
@@ -1059,7 +1091,8 @@ func (g *GravitonStore) GetInteractionIndex(topoheight int64, heights []int64, r
 }
 
 // Stores any SCIDs that were attempted to be deployed but not correct - log scid/fees burnt attempting it.
-func (g *GravitonStore) StoreInvalidSCIDDeploys(scid string, fee uint64) error {
+func (g *GravitonStore) StoreInvalidSCIDDeploys(scid string, fee uint64, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	store := g.DB
 	ss, _ := store.LoadSnapshot(0) // load most recent snapshot
 
@@ -1081,7 +1114,7 @@ func (g *GravitonStore) StoreInvalidSCIDDeploys(scid string, fee uint64) error {
 		tree, terr = prevss.GetTree(treename)
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := "invalid"
@@ -1100,16 +1133,19 @@ func (g *GravitonStore) StoreInvalidSCIDDeploys(scid string, fee uint64) error {
 	}
 	newInvalidSCIDs, err = json.Marshal(currInvalidSCIDs)
 	if err != nil {
-		return fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
+		return tree, changes, fmt.Errorf("[Graviton] could not marshal interactionHeight info: %v", err)
 	}
 
 	tree.Put([]byte(key), newInvalidSCIDs)
-
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v", cerr)
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets any SCIDs that were attempted to be deployed but not correct and their fees
@@ -1145,9 +1181,10 @@ func (g *GravitonStore) GetInvalidSCIDDeploys() map[string]uint64 {
 }
 
 // Stores the miniblocks within a given blid
-func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*structures.MBLInfo) error {
+func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*structures.MBLInfo, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	for _, v := range mbldetails {
-		err := g.StoreMiniblockCountByAddress(v.Miner)
+		_, _, err := g.StoreMiniblockCountByAddress(v.Miner, false)
 		if err != nil {
 			log.Printf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
 		}
@@ -1155,7 +1192,7 @@ func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*s
 
 	confBytes, err := json.Marshal(mbldetails)
 	if err != nil {
-		return fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v", err)
+		return &graviton.Tree{}, changes, fmt.Errorf("[StoreMiniblockDetailsByHash] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -1178,16 +1215,19 @@ func (g *GravitonStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*s
 		tree, terr = prevss.GetTree("miniblocks")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	tree.Put([]byte(blid), confBytes) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Returns all miniblock details for synced chain
@@ -1259,7 +1299,8 @@ func (g *GravitonStore) GetMiniblockDetailsByHash(blid string) []*structures.MBL
 }
 
 // Stores counts of miniblock finders by address
-func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
+func (g *GravitonStore) StoreMiniblockCountByAddress(addr string, nocommit bool) (*graviton.Tree, bool, error) {
+	var changes bool
 	currCount := g.GetMiniblockCountByAddress(addr)
 
 	// Add 1 to currCount
@@ -1267,7 +1308,7 @@ func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
 
 	confBytes, err := json.Marshal(currCount)
 	if err != nil {
-		return fmt.Errorf("[StoreMiniblockCountByAddress] could not marshal getinfo info: %v", err)
+		return &graviton.Tree{}, changes, fmt.Errorf("[StoreMiniblockCountByAddress] could not marshal getinfo info: %v", err)
 	}
 
 	store := g.DB
@@ -1290,17 +1331,20 @@ func (g *GravitonStore) StoreMiniblockCountByAddress(addr string) error {
 		tree, terr = prevss.GetTree("blockcount")
 		if tree == nil {
 			log.Printf("[Graviton] ERROR: %v\n", terr)
-			return terr
+			return tree, changes, terr
 		}
 	}
 	key := addr
 	tree.Put([]byte(key), confBytes) // insert a value
-	_, cerr := graviton.Commit(tree)
-	if cerr != nil {
-		log.Printf("[Graviton] ERROR: %v\n", cerr)
-		return cerr
+	changes = true
+	if !nocommit {
+		_, cerr := graviton.Commit(tree)
+		if cerr != nil {
+			log.Printf("[Graviton] ERROR: %v\n", cerr)
+			return tree, changes, cerr
+		}
 	}
-	return nil
+	return tree, changes, nil
 }
 
 // Gets counts of miniblock finders by address
@@ -1369,6 +1413,19 @@ func (g *GravitonStore) GetSCIDInteractionByAddr(addr string) (scids []string) {
 	}
 
 	return scids
+}
+
+// Commits multiple trees and returns the commit version and errs
+func (g *GravitonStore) CommitTrees(trees []*graviton.Tree) (cv uint64, err error) {
+	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
+	for g.migrating == 1 {
+		log.Printf("[GetMiniblockDetailsByHash] G is migrating... sleeping for %v...\n", g.DBMigrateWait)
+		time.Sleep(g.DBMigrateWait)
+	}
+
+	cv, err = graviton.Commit(trees...)
+
+	return
 }
 
 // ---- End Application Graviton/Backend functions ---- //

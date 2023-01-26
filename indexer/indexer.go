@@ -22,6 +22,7 @@ import (
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
+	"github.com/deroproject/graviton"
 
 	"github.com/creachadair/jrpc2"
 	"github.com/creachadair/jrpc2/channel"
@@ -56,11 +57,6 @@ type Indexer struct {
 	CloseOnDisconnect bool
 	Fastsync          bool
 	sync.RWMutex
-}
-
-type blockTxns struct {
-	topoheight int64
-	tx_hashes  []crypto.Hash
 }
 
 // Defines the number of blocks to jump when testing pruned nodes.
@@ -162,17 +158,38 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 				time.Sleep(writeWait)
 			}
 			indexer.Backend.Writing = 1
-			err = indexer.Backend.StoreOwner(vi, "")
+			var ctrees []*graviton.Tree
+			sotree, sochanges, err := indexer.Backend.StoreOwner(vi, "", true)
 			if err != nil {
 				log.Printf("[StartDaemonMode-hardcodedscids] Error storing owner: %v\n", err)
+			} else {
+				if sochanges {
+					ctrees = append(ctrees, sotree)
+				}
 			}
-			err = indexer.Backend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight)
+			svdtree, svdchanges, err := indexer.Backend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight, true)
 			if err != nil {
 				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v\n", err)
+			} else {
+				if svdchanges {
+					ctrees = append(ctrees, svdtree)
+				}
 			}
-			err = indexer.Backend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight)
+			sihtree, sihchanges, err := indexer.Backend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight, true)
 			if err != nil {
 				log.Printf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v\n", err)
+			} else {
+				if sihchanges {
+					ctrees = append(ctrees, sihtree)
+				}
+			}
+			if len(ctrees) > 0 {
+				_, err := indexer.Backend.CommitTrees(ctrees)
+				if err != nil {
+					log.Printf("[StartDaemonMode-hardcodedscids] ERR - committing trees: %v\n", err)
+				} else {
+					//log.Printf("[StartDaemonMode-hardcodedscids] DEBUG - cv [%v]\n", cv)
+				}
 			}
 			indexer.Backend.Writing = 0
 		}
@@ -322,7 +339,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 									time.Sleep(writeWait)
 								}
 								indexer.Backend.Writing = 1
-								indexer.Backend.StoreLastIndexHeight(currIndex)
+								indexer.Backend.StoreLastIndexHeight(currIndex, false)
 								indexer.Backend.Writing = 0
 								// Break out on closing call
 								break
@@ -354,7 +371,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 											time.Sleep(writeWait)
 										}
 										indexer.Backend.Writing = 1
-										indexer.Backend.StoreLastIndexHeight(rewindIndex)
+										indexer.Backend.StoreLastIndexHeight(rewindIndex, false)
 										indexer.Backend.Writing = 0
 
 										// Break out on closing call
@@ -411,7 +428,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			wg.Add(blockParallelNum)
 
 			var blsctxnsLock sync.RWMutex
-			var blIndexTxns []blockTxns
+			var blIndexTxns []*structures.BlockTxns
 
 			for i := 1; i <= blockParallelNum; i++ {
 				go func(i int) {
@@ -435,7 +452,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						return
 					}
 
-					if len(blockTxns.tx_hashes) > 0 {
+					if len(blockTxns.Tx_hashes) > 0 {
 						blsctxnsLock.Lock()
 						blIndexTxns = append(blIndexTxns, blockTxns)
 						blsctxnsLock.Unlock()
@@ -453,15 +470,15 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 
 			// Arrange blIndexTxns by height so processed linearly
 			sort.SliceStable(blIndexTxns, func(i, j int) bool {
-				return blIndexTxns[i].topoheight < blIndexTxns[j].topoheight
+				return blIndexTxns[i].Topoheight < blIndexTxns[j].Topoheight
 			})
 
 			// Run through blocks one at a time here to max cpu on a given block if large txns rather than split cpu across go routines of multiple blocks
 			for _, v := range blIndexTxns {
-				if len(v.tx_hashes) > 0 {
+				if len(v.Tx_hashes) > 0 {
 					c_sctxs, cregTxCount, cburnTxCount, cnormTxCount, err := indexer.IndexTxn(v)
 					if err != nil {
-						log.Printf("[StartDaemonMode-mainFOR-IndexTxn] %v - ERROR - IndexTxn(%v) - %v", v.topoheight, v.tx_hashes, err)
+						log.Printf("[StartDaemonMode-mainFOR-IndexTxn] %v - ERROR - IndexTxn(%v) - %v", v.Topoheight, v.Tx_hashes, err)
 						return
 					}
 
@@ -481,7 +498,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 				continue
 			}
 
-			if regTxCount > 0 || burnTxCount > 0 || normTxCount > 0 {
+			if (regTxCount > 0 || burnTxCount > 0 || normTxCount > 0) && !(indexer.RunMode == "asset") {
 				err = indexer.indexTxCounts(regTxCount, burnTxCount, normTxCount)
 				if err != nil {
 					log.Printf("[StartDaemonMode-mainFOR-indexTxCounts] ERROR - %v", err)
@@ -503,7 +520,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 					time.Sleep(writeWait)
 				}
 				indexer.Backend.Writing = 1
-				err = indexer.Backend.StoreLastIndexHeight(indexer.LastIndexedHeight)
+				_, _, err := indexer.Backend.StoreLastIndexHeight(indexer.LastIndexedHeight, false)
 				if err != nil {
 					log.Printf("[StartDaemonMode-mainFOR-StoreLastIndexHeight] ERROR - %v", err)
 				}
@@ -653,27 +670,51 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 					return
 				}
 				tempdb.Writing = 1
+				var ctrees []*graviton.Tree
+
+				var sochanges bool
+				var sotree *graviton.Tree
 				if v.fsi != nil {
-					err = tempdb.StoreOwner(v.scid, v.fsi.Owner)
+					sotree, sochanges, err = tempdb.StoreOwner(v.scid, v.fsi.Owner, true)
 				} else {
-					err = tempdb.StoreOwner(v.scid, "")
+					sotree, sochanges, err = tempdb.StoreOwner(v.scid, "", true)
 				}
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing owner: %v\n", err)
+				} else {
+					if sochanges {
+						ctrees = append(ctrees, sotree)
+					}
 				}
-				err = tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight)
+				svdtree, svdchanges, err := tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight, true)
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v\n", err)
+				} else {
+					if svdchanges {
+						ctrees = append(ctrees, svdtree)
+					}
 				}
 				if !scidExist(treenames, v.scid+"vars") {
 					treenames = append(treenames, v.scid+"vars")
 				}
-				err = tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight)
+				sihtree, sihchanges, err := tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight, true)
 				if err != nil {
 					log.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v\n", err)
+				} else {
+					if sihchanges {
+						ctrees = append(ctrees, sihtree)
+					}
 				}
 				if !scidExist(treenames, v.scid+"heights") {
 					treenames = append(treenames, v.scid+"heights")
+				}
+				if len(ctrees) > 0 {
+					_, err := tempdb.CommitTrees(ctrees)
+					if err != nil {
+						log.Printf("[AddSCIDToIndex] ERR - committing trees: %v\n", err)
+					} else {
+						//log.Printf("[AddSCIDToIndex] DEBUG - cv [%v]\n", cv)
+					}
 				}
 				tempdb.Writing = 0
 			} else {
@@ -749,7 +790,9 @@ func (client *Client) Connect(endpoint string) (err error) {
 	return err
 }
 
-func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns blockTxns, err error) {
+func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns *structures.BlockTxns, err error) {
+	blockTxns = &structures.BlockTxns{}
+
 	var io rpc.GetBlock_Result
 	var ip = rpc.GetBlock_Params{Hash: blid}
 
@@ -782,28 +825,30 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns blo
 			//log.Printf("[Indexer-indexBlock-storeminiblockdetails] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
-		indexer.Backend.Writing = 1
-		err2 = indexer.Backend.StoreMiniblockDetailsByHash(blid, mbldetails)
-		if err2 != nil {
-			log.Printf("[indexBlock] Error storing miniblock details for blid %v", err2)
-			return blockTxns, err2
+		if !(indexer.RunMode == "asset") {
+			indexer.Backend.Writing = 1
+			_, _, err2 = indexer.Backend.StoreMiniblockDetailsByHash(blid, mbldetails, false)
+			if err2 != nil {
+				log.Printf("[indexBlock] Error storing miniblock details for blid %v", err2)
+				return blockTxns, err2
+			}
+			indexer.Backend.Writing = 0
 		}
-		indexer.Backend.Writing = 0
 	}
 
-	blockTxns.topoheight = int64(bl.Height)
-	blockTxns.tx_hashes = bl.Tx_hashes
+	blockTxns.Topoheight = int64(bl.Height)
+	blockTxns.Tx_hashes = bl.Tx_hashes
 
 	return
 }
 
-func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXParse, regTxCount int64, burnTxCount int64, normTxCount int64, err error) {
+func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns) (bl_sctxs []structures.SCTXParse, regTxCount int64, burnTxCount int64, normTxCount int64, err error) {
 	var txslock sync.RWMutex
 
 	var wg sync.WaitGroup
-	wg.Add(len(blTxns.tx_hashes))
+	wg.Add(len(blTxns.Tx_hashes))
 
-	for i := 0; i < len(blTxns.tx_hashes); i++ {
+	for i := 0; i < len(blTxns.Tx_hashes); i++ {
 		go func(i int) {
 			if indexer.Closing {
 				wg.Done()
@@ -811,7 +856,7 @@ func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXPa
 			}
 
 			// We can match the PoW scheme result to filter out reg txns without needing to waste GetTransaction calls against saving time - https://github.com/deroproject/derohe/blob/main/cmd/dero-wallet-cli/easymenu_post_open.go#L150
-			if blTxns.tx_hashes[i][0] == 0 && blTxns.tx_hashes[i][1] == 0 && blTxns.tx_hashes[i][2] == 0 {
+			if blTxns.Tx_hashes[i][0] == 0 && blTxns.Tx_hashes[i][1] == 0 && blTxns.Tx_hashes[i][2] == 0 {
 				txslock.Lock()
 				regTxCount++
 				txslock.Unlock()
@@ -827,7 +872,7 @@ func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXPa
 			var inputparam rpc.GetTransaction_Params
 			var output rpc.GetTransaction_Result
 
-			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, blTxns.tx_hashes[i].String())
+			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, blTxns.Tx_hashes[i].String())
 
 			if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
 				log.Printf("[IndexTxn] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
@@ -858,7 +903,7 @@ func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXPa
 				// Other ways to parse this, but will do for now --> see https://github.com/deroproject/derohe/blob/main/blockchain/blockchain.go#L688
 				if sc_action == "1" {
 					method = "installsc"
-					scid = string(blTxns.tx_hashes[i].String())
+					scid = string(blTxns.Tx_hashes[i].String())
 					scid_hex = []byte(scid)
 				} else {
 					method = "scinvoke"
@@ -883,7 +928,7 @@ func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXPa
 				}
 				//time.Sleep(2 * time.Second)
 				txslock.Lock()
-				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: blTxns.tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Payloads: tx.Payloads, Fees: sc_fees, Height: blTxns.topoheight})
+				bl_sctxs = append(bl_sctxs, structures.SCTXParse{Txid: blTxns.Tx_hashes[i].String(), Scid: scid, Scid_hex: scid_hex, Entrypoint: entrypoint, Method: method, Sc_args: sc_args, Sender: sender, Payloads: tx.Payloads, Fees: sc_fees, Height: blTxns.Topoheight})
 				txslock.Unlock()
 			} else if tx.TransactionType == transaction.REGISTRATION {
 				txslock.Lock()
@@ -917,9 +962,11 @@ func (indexer *Indexer) IndexTxn(blTxns blockTxns) (bl_sctxs []structures.SCTXPa
 							if indexer.Closing {
 								return
 							}
-							indexer.Backend.Writing = 1
-							indexer.Backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.topoheight)})
-							indexer.Backend.Writing = 0
+							if !(indexer.RunMode == "asset") {
+								indexer.Backend.Writing = 1
+								indexer.Backend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)}, false)
+								indexer.Backend.Writing = 0
+							}
 						}
 					}
 				}
@@ -938,45 +985,69 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 	if indexer.Closing {
 		return
 	}
+	var ctrees []*graviton.Tree
+	writeWait, _ := time.ParseDuration("50ms")
+	for indexer.Backend.Writing == 1 {
+		if indexer.Closing {
+			return
+		}
+		//log.Printf("[Indexer-indexBlock-regTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
+		time.Sleep(writeWait)
+	}
+	indexer.Backend.Writing = 1
 
 	if regTxCount > 0 && !indexer.Fastsync {
 		// Load from mem existing regTxCount and append new value
 		currRegTxCount := indexer.Backend.GetTxCount("registration")
-		writeWait, _ := time.ParseDuration("50ms")
-		for indexer.Backend.Writing == 1 {
-			if indexer.Closing {
-				return
+		/*
+			writeWait, _ := time.ParseDuration("50ms")
+			for indexer.Backend.Writing == 1 {
+				if indexer.Closing {
+					return
+				}
+				//log.Printf("[Indexer-indexBlock-regTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
 			}
-			//log.Printf("[Indexer-indexBlock-regTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
-			time.Sleep(writeWait)
-		}
-		indexer.Backend.Writing = 1
-		err = indexer.Backend.StoreTxCount(regTxCount+currRegTxCount, "registration")
-		indexer.Backend.Writing = 0
+			indexer.Backend.Writing = 1
+		*/
+		rtxtree, rtxchanges, err := indexer.Backend.StoreTxCount(regTxCount+currRegTxCount, "registration", true)
+		//indexer.Backend.Writing = 0
 		if err != nil {
 			log.Printf("[indexBlock] ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currRegTxCount, regTxCount, regTxCount+currRegTxCount)
-			return
+			indexer.Backend.Writing = 0
+			return err
+		} else {
+			if rtxchanges {
+				ctrees = append(ctrees, rtxtree)
+			}
 		}
 	}
 
 	if burnTxCount > 0 && !indexer.Fastsync {
 		// Load from mem existing burnTxCount and append new value
 		currBurnTxCount := indexer.Backend.GetTxCount("burn")
-		writeWait, _ := time.ParseDuration("50ms")
-		for indexer.Backend.Writing == 1 {
-			if indexer.Closing {
-				return
+		/*
+			writeWait, _ := time.ParseDuration("50ms")
+			for indexer.Backend.Writing == 1 {
+				if indexer.Closing {
+					return
+				}
+				//log.Printf("[Indexer-indexBlock-burnTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
 			}
-			//log.Printf("[Indexer-indexBlock-burnTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
-			time.Sleep(writeWait)
-		}
-		indexer.Backend.Writing = 1
-		err = indexer.Backend.StoreTxCount(burnTxCount+currBurnTxCount, "burn")
+			indexer.Backend.Writing = 1
+		*/
+		btxtree, btxchanges, err := indexer.Backend.StoreTxCount(burnTxCount+currBurnTxCount, "burn", true)
 		if err != nil {
 			log.Printf("[indexBlock] ERROR - Error storing burn tx count. DB '%v' - this block count '%v' - total '%v'", currBurnTxCount, burnTxCount, regTxCount+currBurnTxCount)
-			return
+			indexer.Backend.Writing = 0
+			return err
+		} else {
+			if btxchanges {
+				ctrees = append(ctrees, btxtree)
+			}
 		}
-		indexer.Backend.Writing = 0
+		//indexer.Backend.Writing = 0
 	}
 
 	if normTxCount > 0 && !indexer.Fastsync {
@@ -1039,27 +1110,42 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 
 		// Load from mem existing normTxCount and append new value
 		currNormTxCount := indexer.Backend.GetTxCount("normal")
-		writeWait, _ := time.ParseDuration("50ms")
-		for indexer.Backend.Writing == 1 {
-			if indexer.Closing {
-				return
+		/*
+			writeWait, _ := time.ParseDuration("50ms")
+			for indexer.Backend.Writing == 1 {
+				if indexer.Closing {
+					return
+				}
+				//log.Printf("[Indexer-indexBlock-normTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
 			}
-			//log.Printf("[Indexer-indexBlock-normTxCount] GravitonDB is writing... sleeping for %v...", writeWait)
-			time.Sleep(writeWait)
-		}
-		indexer.Backend.Writing = 1
-		err = indexer.Backend.StoreTxCount(normTxCount+currNormTxCount, "normal")
+			indexer.Backend.Writing = 1
+		*/
+		ntxtree, ntxchanges, err := indexer.Backend.StoreTxCount(normTxCount+currNormTxCount, "normal", true)
 		if err != nil {
 			log.Printf("[indexBlock] ERROR - Error storing normal tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, currNormTxCount, normTxCount+currNormTxCount)
-			return
+			indexer.Backend.Writing = 0
+			return err
+		} else {
+			if ntxchanges {
+				ctrees = append(ctrees, ntxtree)
+			}
 		}
-		indexer.Backend.Writing = 0
 	}
+	if len(ctrees) > 0 {
+		_, err := indexer.Backend.CommitTrees(ctrees)
+		if err != nil {
+			log.Printf("[indexBlock-indexTxCounts] ERR - committing trees: %v\n", err)
+		} else {
+			//log.Printf("[indexBlock-installsc] DEBUG - cv [%v]\n", cv)
+		}
+	}
+	indexer.Backend.Writing = 0
 
 	return nil
 }
 
-func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns blockTxns) (err error) {
+func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *structures.BlockTxns) (err error) {
 
 	if indexer.Closing {
 		return
@@ -1068,6 +1154,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 	if len(bl_sctxs) > 0 {
 		//log.Printf("Block %v has %v SC tx(s).\n", bl.GetHash(), len(bl_sctxs))
 
+		// TODO: Go routine possible for pre-storage components given the number of 'potential' getscvar calls that may be required.. could speed up indexing some more.
 		for i := 0; i < len(bl_sctxs); i++ {
 			if bl_sctxs[i].Method == "installsc" {
 				var contains bool
@@ -1093,7 +1180,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 					log.Printf("[indexBlock-installsc] SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
-					scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.topoheight)
+					scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
@@ -1111,23 +1198,55 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 							time.Sleep(writeWait)
 						}
 						indexer.Backend.Writing = 1
-						err = indexer.Backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
+						var ctrees []*graviton.Tree
+						sotree, sochanges, err := indexer.Backend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender, true)
 						if err != nil {
 							log.Printf("[indexBlock-installsc] Error storing owner: %v\n", err)
+						} else {
+							if sochanges {
+								ctrees = append(ctrees, sotree)
+							}
 						}
 
-						err = indexer.Backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.topoheight, &bl_sctxs[i])
+						sidtree, sidchanges, err := indexer.Backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &bl_sctxs[i], true)
 						if err != nil {
 							log.Printf("[indexBlock-installsc] Err storing invoke details. Err: %v\n", err)
 							time.Sleep(5 * time.Second)
 							return err
+						} else {
+							if sidchanges {
+								ctrees = append(ctrees, sidtree)
+							}
 						}
 
-						indexer.Backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.topoheight)
-						indexer.Backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.topoheight)
+						svdtree, svdchanges, err := indexer.Backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
+						if err != nil {
+							log.Printf("[indexBlock-installsc] ERR - storing scid variable details: %v\n", err)
+						} else {
+							if svdchanges {
+								ctrees = append(ctrees, svdtree)
+							}
+						}
+						sihtree, sihchanges, err := indexer.Backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
+						if err != nil {
+							log.Printf("[indexBlock-installsc] ERR - storing scid interaction height: %v\n", err)
+						} else {
+							if sihchanges {
+								ctrees = append(ctrees, sihtree)
+							}
+						}
+						if len(ctrees) > 0 {
+							_, err := indexer.Backend.CommitTrees(ctrees)
+							if err != nil {
+								log.Printf("[indexBlock-installsc] ERR - committing trees: %v\n", err)
+							} else {
+								//log.Printf("[indexBlock-installsc] DEBUG - cv [%v]\n", cv)
+							}
+						}
 						indexer.Backend.Writing = 0
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
+						//log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						log.Printf("[indexBlock-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("50ms")
@@ -1138,16 +1257,18 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 							//log.Printf("[Indexer-indexBlock-sctxshandle] GravitonDB is writing... sleeping for %v...", writeWait)
 							time.Sleep(writeWait)
 						}
-						indexer.Backend.Writing = 1
-						indexer.Backend.StoreInvalidSCIDDeploys(bl_sctxs[i].Scid, bl_sctxs[i].Fees)
-						indexer.Backend.Writing = 0
+						if !(indexer.RunMode == "asset") {
+							indexer.Backend.Writing = 1
+							indexer.Backend.StoreInvalidSCIDDeploys(bl_sctxs[i].Scid, bl_sctxs[i].Fees, false)
+							indexer.Backend.Writing = 0
+						}
 					}
 				}
 			} else {
 				if !scidExist(indexer.ValidatedSCs, bl_sctxs[i].Scid) {
 
 					// Validate SCID is *actually* a valid SCID
-					valVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.topoheight)
+					valVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
 
 					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 					if len(valVars) > 0 {
@@ -1165,7 +1286,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 							time.Sleep(writeWait)
 						}
 						indexer.Backend.Writing = 1
-						err = indexer.Backend.StoreOwner(bl_sctxs[i].Scid, "")
+						_, _, err = indexer.Backend.StoreOwner(bl_sctxs[i].Scid, "", false)
 						if err != nil {
 							log.Printf("[indexBlock] Error storing owner: %v\n", err)
 						}
@@ -1192,26 +1313,57 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns bl
 							time.Sleep(writeWait)
 						}
 						indexer.Backend.Writing = 1
+						var ctrees []*graviton.Tree
 
 						// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
 						if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
 							log.Printf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 						} else {
-							err = indexer.Backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.topoheight, &currsctx)
-							if err != nil {
-								log.Printf("[indexBlock] Err storing invoke details. Err: %v\n", err)
-								time.Sleep(5 * time.Second)
-								return err
-							}
+							if !(indexer.RunMode == "asset") {
+								sidtree, sidchanges, err := indexer.Backend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx, true)
+								if err != nil {
+									log.Printf("[indexBlock] Err storing invoke details. Err: %v\n", err)
+									time.Sleep(5 * time.Second)
+									return err
+								} else {
+									if sidchanges {
+										ctrees = append(ctrees, sidtree)
+									}
+								}
 
-							// Gets the SC variables (key/value) at a given topoheight and then stores them
-							scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.topoheight)
-							indexer.Backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.topoheight)
-							indexer.Backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.topoheight)
+								// Gets the SC variables (key/value) at a given topoheight and then stores them
+								scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
+								svdtree, svdchanges, err := indexer.Backend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
+								if err != nil {
+									log.Printf("[indexBlock] ERR - storing scid variable details: %v\n", err)
+								} else {
+									if svdchanges {
+										ctrees = append(ctrees, svdtree)
+									}
+								}
+								sihtree, sihchanges, err := indexer.Backend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
+								if err != nil {
+									log.Printf("[indexBlock] ERR - storing scid interaction height: %v\n", err)
+								} else {
+									if sihchanges {
+										ctrees = append(ctrees, sihtree)
+									}
+								}
+							}
+						}
+
+						if len(ctrees) > 0 {
+							_, err := indexer.Backend.CommitTrees(ctrees)
+							if err != nil {
+								log.Printf("[indexBlock] ERR - committing trees: %v\n", err)
+							} else {
+								//log.Printf("[indexBlock] DEBUG - cv [%v]\n", cv)
+							}
 						}
 						indexer.Backend.Writing = 0
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
+						//log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						//log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
@@ -1312,7 +1464,7 @@ func (indexer *Indexer) getInfo() {
 						time.Sleep(writeWait)
 					}
 					indexer.Backend.Writing = 1
-					err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
+					_, _, err := indexer.Backend.StoreGetInfoDetails(structureGetInfo, false)
 					if err != nil {
 						log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
 					}
@@ -1345,7 +1497,7 @@ func (indexer *Indexer) getInfo() {
 				time.Sleep(writeWait)
 			}
 			indexer.Backend.Writing = 1
-			err := indexer.Backend.StoreGetInfoDetails(structureGetInfo)
+			_, _, err := indexer.Backend.StoreGetInfoDetails(structureGetInfo, false)
 			if err != nil {
 				log.Printf("[getInfo] ERROR - GetInfo store failed: %v\n", err)
 			}

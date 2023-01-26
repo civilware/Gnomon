@@ -3,6 +3,7 @@ package structures
 import (
 	"encoding/json"
 
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
 )
@@ -74,6 +75,11 @@ type GnomonSCIDQuery struct {
 
 type SCIDInteractionHeight struct {
 	Heights map[int64]string
+}
+
+type BlockTxns struct {
+	Topoheight int64
+	Tx_hashes  []crypto.Hash
 }
 
 type GetInfo rpc.GetInfo_Result

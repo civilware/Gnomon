@@ -167,7 +167,7 @@ func (apiServer *ApiServer) collectStats() {
 	regTxCount := apiServer.Backend.GetTxCount("registration")
 	burnTxCount := apiServer.Backend.GetTxCount("burn")
 	normTxCount := apiServer.Backend.GetTxCount("normal")
-	stats["numscs"] = len(sclist) + 1
+	stats["numscs"] = len(sclist)
 	stats["indexedscs"] = sclist
 	stats["indexdetails"] = lastQueries
 	stats["regTxCount"] = regTxCount
