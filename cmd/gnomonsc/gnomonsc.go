@@ -161,7 +161,11 @@ func runGnomonIndexer(derodendpoint string) {
 	mux.Lock()
 	defer mux.Unlock()
 	log.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
-	graviton_backend := storage.NewGravDBRAM("25ms")
+	graviton_backend, err := storage.NewGravDBRAM("25ms")
+	if err != nil {
+		log.Printf("[runGnomonIndexer] Error creating new gravdb: %v", err)
+		return
+	}
 	defaultIndexer := indexer.NewIndexer(graviton_backend, nil, int64(1), derodendpoint, "daemon", false, false, true)
 	defaultIndexer.StartDaemonMode(1)
 

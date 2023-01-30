@@ -198,7 +198,10 @@ func main() {
 	var Graviton_backend *storage.GravitonStore
 	var csearch_filter string
 	if ramstore {
-		Graviton_backend = storage.NewGravDBRAM("25ms")
+		Graviton_backend, err = storage.NewGravDBRAM("25ms")
+		if err != nil {
+			log.Fatalf("[Main] Err creating gravdb: %v", err)
+		}
 	} else {
 		var shasum string
 		if len(search_filter) == 0 {
@@ -208,7 +211,15 @@ func main() {
 			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(csearch_filter)))
 		}
 		db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
-		Graviton_backend = storage.NewGravDB(db_folder, "25ms")
+		current_path, err := os.Getwd()
+		if err != nil {
+			log.Printf("%v\n", err)
+		}
+		db_path := filepath.Join(current_path, db_folder)
+		Graviton_backend, err = storage.NewGravDB(db_path, "25ms")
+		if err != nil {
+			log.Fatalf("[Main] Err creating gravdb: %v", err)
+		}
 	}
 
 	// API
@@ -385,12 +396,23 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				// Database
 				var nBackend *storage.GravitonStore
 				if fastsync || ramstore {
-					nBackend = storage.NewGravDBRAM("25ms")
+					nBackend, err = storage.NewGravDBRAM("25ms")
+					if err != nil {
+						log.Fatalf("[new_sf] Err creating gravdb: %v", err)
+					}
 				} else {
 					nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
 					nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
-					log.Printf("Adding new database '%v'\n", nDBFolder)
-					nBackend = storage.NewGravDB(nDBFolder, "25ms")
+					current_path, err := os.Getwd()
+					if err != nil {
+						log.Printf("%v\n", err)
+					}
+					db_path := filepath.Join(current_path, nDBFolder)
+					log.Printf("Adding new database '%v'\n", db_path)
+					nBackend, err = storage.NewGravDB(db_path, "25ms")
+					if err != nil {
+						log.Fatalf("[new_sf] Err creating gravdb: %v", err)
+					}
 				}
 
 				// Start default indexer based on search_filter params

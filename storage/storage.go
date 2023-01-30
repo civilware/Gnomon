@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +15,6 @@ import (
 
 type GravitonStore struct {
 	DB            *graviton.Store
-	DBFolder      string
 	DBPath        string
 	DBTrees       []string
 	migrating     int
@@ -36,37 +33,24 @@ type TreeKV struct {
 
 // ---- Application Graviton/Backend functions ---- //
 // Builds new Graviton DB based on input from main()
-func NewGravDB(dbFolder, dbmigratewait string) *GravitonStore {
+func NewGravDB(dbPath, dbmigratewait string) (*GravitonStore, error) {
+	var err error
 	var graviton_backend *GravitonStore = &GravitonStore{}
-
-	current_path, err := os.Getwd()
-	if err != nil {
-		log.Printf("%v\n", err)
-	}
 
 	graviton_backend.DBMigrateWait, _ = time.ParseDuration(dbmigratewait)
 
-	graviton_backend.DBFolder = dbFolder
-
-	graviton_backend.DBPath = filepath.Join(current_path, dbFolder)
+	graviton_backend.DBPath = dbPath
 
 	graviton_backend.DB, err = graviton.NewDiskStore(graviton_backend.DBPath)
 	if err != nil {
-		log.Fatalf("[NewGravDB] Could not create db store: %v\n", err)
+		return graviton_backend, fmt.Errorf("[NewGravDB] Could not create db store: %v", err)
 	}
 
-	// Incase we ever need to implement SwapGravDB - an array of dbtrees will be needed to cursor all data since it's at the tree level to ensure proper export/import
-	/*
-		for i := 0; i < len(dbtrees); i++ {
-			graviton_backend.DBTrees = append(graviton_backend.DBTrees, dbtrees[i])
-		}
-	*/
-
-	return graviton_backend
+	return graviton_backend, err
 }
 
 // Builds new Graviton DB based on input from main() RAM store
-func NewGravDBRAM(dbmigratewait string) *GravitonStore {
+func NewGravDBRAM(dbmigratewait string) (*GravitonStore, error) {
 	var err error
 	var graviton_backend *GravitonStore = &GravitonStore{}
 
@@ -75,10 +59,10 @@ func NewGravDBRAM(dbmigratewait string) *GravitonStore {
 	//graviton_backend.DB, err = graviton.NewDiskStore(graviton_backend.DBPath)
 	graviton_backend.DB, err = graviton.NewMemStore()
 	if err != nil {
-		log.Fatalf("[NewGravDB] Could not create db store: %v\n", err)
+		return graviton_backend, fmt.Errorf("[NewGravDB] Could not create db store: %v", err)
 	}
 
-	return graviton_backend
+	return graviton_backend, err
 }
 
 // Stores gnomon's last indexed height - this is for stateful stores on close and reference on open

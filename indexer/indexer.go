@@ -601,7 +601,10 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	var scidstoindexstage []SCIDToIndexStage
 
 	log.Printf("[AddSCIDToIndex] Starting - Sorting %v SCIDs to index", len(scidstoadd))
-	tempdb := storage.NewGravDBRAM("25ms")
+	tempdb, err := storage.NewGravDBRAM("25ms")
+	if err != nil {
+		return fmt.Errorf("[AddSCIDToIndex] Error creating new gravdb: %v", err)
+	}
 	var treenames []string
 	// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
 	treenames = append(treenames, "owner")
