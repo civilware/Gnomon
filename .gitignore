@@ -8,3 +8,7 @@ testnet*
 /build
 build_all.sh
 build_package.sh
+/cmd/gnomonindexer/gnomonindexer
+/cmd/gnomonindexer/*.db
+/cmd/gnomonsc/gnomonsc
+/storage/bbolt_bak.txt

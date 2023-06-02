@@ -16,17 +16,21 @@ import (
 )
 
 type ApiServer struct {
-	Config    *structures.APIConfig
-	Stats     atomic.Value
-	StatsIntv time.Duration
-	Backend   *store.GravitonStore
+	Config        *structures.APIConfig
+	Stats         atomic.Value
+	StatsIntv     time.Duration
+	GravDBBackend *store.GravitonStore
+	BBSBackend    *store.BboltStore
+	DBType        string
 }
 
 // Configures a new API server to be used
-func NewApiServer(cfg *structures.APIConfig, backend *store.GravitonStore) *ApiServer {
+func NewApiServer(cfg *structures.APIConfig, gravdbbackend *store.GravitonStore, bbsbackend *store.BboltStore, dbtype string) *ApiServer {
 	return &ApiServer{
-		Config:  cfg,
-		Backend: backend,
+		Config:        cfg,
+		GravDBBackend: gravdbbackend,
+		BBSBackend:    bbsbackend,
+		DBType:        dbtype,
 	}
 }
 
@@ -123,19 +127,47 @@ func notFound(writer http.ResponseWriter, _ *http.Request) {
 
 // Continuous check on number of validated scs etc. for base stats of service.
 func (apiServer *ApiServer) collectStats() {
-	if apiServer.Backend.Closing {
-		return
+	switch apiServer.DBType {
+	case "gravdb":
+		if apiServer.GravDBBackend.Closing {
+			return
+		}
+	case "boltdb":
+		if apiServer.BBSBackend.Closing {
+			return
+		}
 	}
+
 	stats := make(map[string]interface{})
+	sclist := make(map[string]string)
 
 	// TODO: Removeme
 	var scinstalls []*structures.SCTXParse
-	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	switch apiServer.DBType {
+	case "gravdb":
+		sclist = apiServer.GravDBBackend.GetAllOwnersAndSCIDs()
+	case "boltdb":
+		sclist = apiServer.BBSBackend.GetAllOwnersAndSCIDs()
+	}
 	for k, _ := range sclist {
-		if apiServer.Backend.Closing {
-			return
+		switch apiServer.DBType {
+		case "gravdb":
+			if apiServer.GravDBBackend.Closing {
+				return
+			}
+		case "boltdb":
+			if apiServer.BBSBackend.Closing {
+				return
+			}
 		}
-		invokedetails := apiServer.Backend.GetAllSCIDInvokeDetails(k)
+
+		var invokedetails []*structures.SCTXParse
+		switch apiServer.DBType {
+		case "gravdb":
+			invokedetails = apiServer.GravDBBackend.GetAllSCIDInvokeDetails(k)
+		case "boltdb":
+			invokedetails = apiServer.BBSBackend.GetAllSCIDInvokeDetails(k)
+		}
 		i := 0
 		for _, v := range invokedetails {
 			sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
@@ -164,9 +196,18 @@ func (apiServer *ApiServer) collectStats() {
 	// Get all scid:owner
 	// TODO: Re-add
 	//sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
-	regTxCount := apiServer.Backend.GetTxCount("registration")
-	burnTxCount := apiServer.Backend.GetTxCount("burn")
-	normTxCount := apiServer.Backend.GetTxCount("normal")
+	var regTxCount, burnTxCount, normTxCount int64
+	switch apiServer.DBType {
+	case "gravdb":
+		regTxCount = apiServer.GravDBBackend.GetTxCount("registration")
+		burnTxCount = apiServer.GravDBBackend.GetTxCount("burn")
+		normTxCount = apiServer.GravDBBackend.GetTxCount("normal")
+	case "boltdb":
+		regTxCount = apiServer.BBSBackend.GetTxCount("registration")
+		burnTxCount = apiServer.BBSBackend.GetTxCount("burn")
+		normTxCount = apiServer.BBSBackend.GetTxCount("normal")
+	}
+
 	stats["numscs"] = len(sclist)
 	stats["indexedscs"] = sclist
 	stats["indexdetails"] = lastQueries
@@ -244,7 +285,13 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	}
 
 	// Get all scid:owner
-	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	sclist := make(map[string]string)
+	switch apiServer.DBType {
+	case "gravdb":
+		sclist = apiServer.GravDBBackend.GetAllOwnersAndSCIDs()
+	case "boltdb":
+		sclist = apiServer.BBSBackend.GetAllOwnersAndSCIDs()
+	}
 
 	if address != "" && scid != "" {
 		// Return results that match both address and scid
@@ -252,7 +299,12 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 
 		for k := range sclist {
 			if k == scid {
-				addrscidinvokes = apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				switch apiServer.DBType {
+				case "gravdb":
+					addrscidinvokes = apiServer.GravDBBackend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				case "boltdb":
+					addrscidinvokes = apiServer.BBSBackend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				}
 				break
 			}
 		}
@@ -264,7 +316,13 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		var addrinvokes [][]*structures.SCTXParse
 
 		for k := range sclist {
-			currinvokedetails := apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			var currinvokedetails []*structures.SCTXParse
+			switch apiServer.DBType {
+			case "gravdb":
+				currinvokedetails = apiServer.GravDBBackend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			case "boltdb":
+				currinvokedetails = apiServer.BBSBackend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			}
 
 			if currinvokedetails != nil {
 				addrinvokes = append(addrinvokes, currinvokedetails)
@@ -275,7 +333,13 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		reply["addrinvokes"] = addrinvokes
 	} else if address == "" && scid != "" {
 		// If no address and scid only, return invokes of scid
-		scidinvokes := apiServer.Backend.GetAllSCIDInvokeDetails(scid)
+		var scidinvokes []*structures.SCTXParse
+		switch apiServer.DBType {
+		case "gravdb":
+			scidinvokes = apiServer.GravDBBackend.GetAllSCIDInvokeDetails(scid)
+		case "boltdb":
+			scidinvokes = apiServer.BBSBackend.GetAllSCIDInvokeDetails(scid)
+		}
 		reply["scidinvokescount"] = len(scidinvokes)
 		reply["scidinvokes"] = scidinvokes
 	}
@@ -333,6 +397,9 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 	if height != "" {
 		var variables []*structures.SCIDVariable
+		var scidInteractionHeights []int64
+		var interactionHeight int64
+
 		var err error
 
 		var topoheight int64
@@ -346,12 +413,22 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 			}
 		}
 
-		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+		switch apiServer.DBType {
+		case "gravdb":
+			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
 
-		interactionHeight := apiServer.Backend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
+			interactionHeight = apiServer.GravDBBackend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
 
-		// TODO: If there's no interaction height, do we go get scvars against daemon and store?
-		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
+			variables = apiServer.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+		case "boltdb":
+			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
+
+			interactionHeight = apiServer.BBSBackend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
+
+			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
+			variables = apiServer.BBSBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+		}
 
 		reply["variables"] = variables
 		reply["scidinteractionheight"] = interactionHeight
@@ -359,6 +436,8 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		// TODO: Do we need this case? Should we always require a height to be defined so as not to slow the api return due to large dataset? Do we keep but put a limit on return amount?
 
 		variables := make(map[int64][]*structures.SCIDVariable)
+		var scidInteractionHeights []int64
+		var currVars []*structures.SCIDVariable
 
 		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
 		if scid == "0000000000000000000000000000000000000000000000000000000000000001" {
@@ -372,11 +451,21 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 			return
 		}
 
-		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+		switch apiServer.DBType {
+		case "gravdb":
+			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
 
-		for _, h := range scidInteractionHeights {
-			currVars := apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, h)
-			variables[h] = currVars
+			for _, h := range scidInteractionHeights {
+				currVars = apiServer.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(scid, h)
+				variables[h] = currVars
+			}
+		case "boltdb":
+			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
+
+			for _, h := range scidInteractionHeights {
+				currVars = apiServer.BBSBackend.GetSCIDVariableDetailsAtTopoheight(scid, h)
+				variables[h] = currVars
+			}
 		}
 
 		reply["variables"] = variables
@@ -437,8 +526,17 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 		return
 	}
 
-	allNormTxWithSCIDByAddr := apiServer.Backend.GetAllNormalTxWithSCIDByAddr(address)
-	allNormTxWithSCIDBySCID := apiServer.Backend.GetAllNormalTxWithSCIDBySCID(scid)
+	var allNormTxWithSCIDByAddr []*structures.NormalTXWithSCIDParse
+	var allNormTxWithSCIDBySCID []*structures.NormalTXWithSCIDParse
+
+	switch apiServer.DBType {
+	case "gravdb":
+		allNormTxWithSCIDByAddr = apiServer.GravDBBackend.GetAllNormalTxWithSCIDByAddr(address)
+		allNormTxWithSCIDBySCID = apiServer.GravDBBackend.GetAllNormalTxWithSCIDBySCID(scid)
+	case "boltdb":
+		allNormTxWithSCIDByAddr = apiServer.BBSBackend.GetAllNormalTxWithSCIDByAddr(address)
+		allNormTxWithSCIDBySCID = apiServer.BBSBackend.GetAllNormalTxWithSCIDBySCID(scid)
+	}
 
 	reply["normtxwithscidbyaddr"] = allNormTxWithSCIDByAddr
 	reply["normtxwithscidbyaddrcount"] = len(allNormTxWithSCIDByAddr)
@@ -458,8 +556,14 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 	writer.WriteHeader(http.StatusOK)
 
 	reply := make(map[string]interface{})
+	invalidscids := make(map[string]uint64)
 
-	invalidscids := apiServer.Backend.GetInvalidSCIDDeploys()
+	switch apiServer.DBType {
+	case "gravdb":
+		invalidscids = apiServer.GravDBBackend.GetInvalidSCIDDeploys()
+	case "boltdb":
+		invalidscids = apiServer.BBSBackend.GetInvalidSCIDDeploys()
+	}
 	reply["invalidscids"] = invalidscids
 
 	err := json.NewEncoder(writer).Encode(reply)
@@ -503,7 +607,14 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 		blid = blidkeys[0]
 	}
 
-	allMiniBlocksByBlid := apiServer.Backend.GetMiniblockDetailsByHash(blid)
+	var allMiniBlocksByBlid []*structures.MBLInfo
+
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocksByBlid = apiServer.GravDBBackend.GetMiniblockDetailsByHash(blid)
+	case "boltdb":
+		allMiniBlocksByBlid = apiServer.BBSBackend.GetMiniblockDetailsByHash(blid)
+	}
 
 	reply["mbl"] = allMiniBlocksByBlid
 
@@ -548,7 +659,13 @@ func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.
 		addr = addrkeys[0]
 	}
 
-	allMiniBlocksByAddr := apiServer.Backend.GetMiniblockCountByAddress(addr)
+	var allMiniBlocksByAddr int64
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocksByAddr = apiServer.GravDBBackend.GetMiniblockCountByAddress(addr)
+	case "boltdb":
+		allMiniBlocksByAddr = apiServer.BBSBackend.GetMiniblockCountByAddress(addr)
+	}
 
 	reply["mbl"] = allMiniBlocksByAddr
 
@@ -577,7 +694,13 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 		reply["hello"] = "world"
 	}
 
-	allMiniBlocks := apiServer.Backend.GetAllMiniblockDetails()
+	allMiniBlocks := make(map[string][]*structures.MBLInfo)
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocks = apiServer.GravDBBackend.GetAllMiniblockDetails()
+	case "boltdb":
+		allMiniBlocks = apiServer.BBSBackend.GetAllMiniblockDetails()
+	}
 
 	reply["mbl"] = allMiniBlocks
 
@@ -595,7 +718,14 @@ func (apiServer *ApiServer) GetInfo(writer http.ResponseWriter, _ *http.Request)
 
 	reply := make(map[string]interface{})
 
-	info := apiServer.Backend.GetGetInfoDetails()
+	var info *structures.GetInfo
+	switch apiServer.DBType {
+	case "gravdb":
+		info = apiServer.GravDBBackend.GetGetInfoDetails()
+	case "boltdb":
+		info = apiServer.BBSBackend.GetGetInfoDetails()
+	}
+
 	reply["getinfo"] = info
 
 	err := json.NewEncoder(writer).Encode(reply)

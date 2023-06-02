@@ -1,11 +1,11 @@
 ![](https://github.com/civilware/Gnomon/blob/main/gnomon.png?raw=true)
 
-## Gnomon
-### Decentralized Search Engine
+## Gnomon <!-- omit in toc -->
+### Decentralized Search Engine <!-- omit in toc -->
 
 Gnomon is an open source decentralized search engine built on the DERO Decentralized Application Platform. It aims to provide easy access to blockchain data by reading and indexing data received directly from the connected node (daemon). By allowing user provided search terms, Gnomon can query and index any resulting data for use in decentralized applications and more. There are no trusted third-parties, tracking services, or cloud servers that stand between you and your data.
 
-### Core Features
+### Core Features <!-- omit in toc -->
 
 * Smart Contract querying and indexing
 * Transaction querying and indexing
@@ -17,19 +17,62 @@ Built for the masses.
 
 <br>
 
+## Table of Contents <!-- omit in toc -->
+- [Using Gnomon As A Package](#using-gnomon-as-a-package)
+  - [Search Filter(s)](#search-filters)
+  - [Setting Up Database](#setting-up-database)
+    - [BoltDB](#boltdb)
+    - [GravitonDB](#gravitondb)
+  - [Defining Your Indexer(s)](#defining-your-indexers)
+  - [Reading From DB(s)](#reading-from-dbs)
+    - [BoltDB](#boltdb-1)
+    - [GravitonDB](#gravitondb-1)
+  - [Defining API(s)](#defining-apis)
+- [GnomonIndexer](#gnomonindexer)
+- [GnomonSC Index Service](#gnomonsc-index-service)
+  - [Running the GnomonSC Index Service](#running-the-gnomonsc-index-service)
+
 ## Using Gnomon As A Package
-With Gnomon you have another choice, to use the repository as a package within whatever means you'd like to use it. The basis is to be able to leverage it for your own dApps or other configurations which may need to track specific contracts or data and use it appropriately.
+Gnomon is written with the expectation that the primary use case would be consuming it as a go package. The basis is to be able to leverage it for your own dApps or other configurations which may need to track specific contracts or data and use it appropriately. You can also use it as a [standalone command line interface](#gnomonindexer).
 
 ### Search Filter(s)
 ```go
 // Search filter - can be "" for any/everything, or specific to a piece of code in your template.bas files etc.
 search_filter := "Function InitializePrivate() Uint64"
+
+// You can also define multiple with the ';;;' separator
+search_filter := "InitializePrivate;;;SEND_DERO_TO_ADDRESS;;;SEND_ASSET_TO_ADDRESS"
 ```
 
-### Setting Up Database(s)
+### Setting Up Database
+#### BoltDB
 ```go
 import "github.com/civilware/Gnomon/storage"
 ...
+
+var Graviton_backend *storage.GravitonStore
+var Bbs_backend *storage.BboltStore
+
+// Database
+var shasum string
+shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))  // shasum can be used to unique a given db directory if you choose, can use normal words as well - whatever your 
+
+db_name := fmt.Sprintf("%s_%s.db", "GNOMON", shasum)
+current_path, err := os.Getwd()
+if err != nil {
+    log.Printf("%v\n", err)
+}
+db_path := filepath.Join(current_path, db_name)
+Bbs_backend, err = storage.NewBBoltDB(db_path, db_name)
+```
+
+#### GravitonDB
+```go
+import "github.com/civilware/Gnomon/storage"
+...
+
+var Graviton_backend *storage.GravitonStore
+var Bbs_backend *storage.BboltStore
 
 // Database
 var shasum string
@@ -42,6 +85,9 @@ Graviton_backend := storage.NewGravDB(db_folder, "25ms")
 ```go
 import "github.com/civilware/Gnomon/indexer"
 ...
+
+// dbtype defines what type of backend db will be used for storage. boltdb being the default and gravitondb being another option.
+dbtype := "boltdb"
 
 // Last IndexedHeight - This can be used in addition to the db store for picking up where you left off. 
 // Graviton_backend.StoreLastIndexHeight(LastIndexedHeight)  - either on-close or in a channel interval etc.
@@ -65,10 +111,34 @@ closeondisconnect := false
 fastsync := false
 
 // Indexer
-defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fastsync)
+defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, dbtype, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fastsync)
 ```
 
-### Reading From Graviton DB(s)
+### Reading From DB(s)
+#### BoltDB
+[boltdb](https://github.com/etcd-io/bbolt)
+```go
+import "github.com/civilware/Gnomon/storage"
+...
+
+// Examples:
+// Return search_filter validated SCIDs and their respective owners (if it could be parsed [ringsize = 2])
+validatedSCIDs := Bbs_backend.GetAllOwnersAndSCIDs()
+
+// Get last indexed height for continuing along
+last_indexedheight := Bbs_backend.GetLastIndexHeight()
+
+// Get all SC transfer txs that are 'normal' transfers by a given address
+allNormalTxWithSCID := Bbs_backend.GetAllNormalTxWithSCIDByAddr("address")
+
+// Get all SCID invokes 
+allSCIDInvokes := Bbs_backend.GetAllSCIDInvokeDetails("scid")
+
+// And so on... get functions within bbolt.go.go
+```
+
+#### GravitonDB
+[Graviton](https://github.com/deroproject/graviton)
 ```go
 import "github.com/civilware/Gnomon/storage"
 ...
@@ -86,7 +156,7 @@ allNormalTxWithSCID := Graviton_backend.GetAllNormalTxWithSCIDByAddr("address")
 // Get all SCID invokes 
 allSCIDInvokes := Graviton_backend.GetAllSCIDInvokeDetails("scid")
 
-// And so on... get functions within storage.go
+// And so on... get functions within gravdb.go
 ```
 
 ### Defining API(s)
@@ -113,4 +183,26 @@ apic := &structures.APIConfig{
     GetInfoKeyFile:       "getinfocert.key",    // Key file for getinfo ssl
     MBLLookup:            mbl,
 }
+```
+
+## GnomonIndexer
+The [gnomonindexer](/cmd/gnomonindexer/gnomonindexer.go) command line interface allows for kicking off an indexer to analyze the DERO blockchain transactions. This indexer is primarily used for indexing smart contract interactions and asset transactions.
+
+You have the ability to index at a single block at a time to multiple blocks at a time. Keep in mind that the more you increase --num-parallel-blocks the greater the load on gnomonindexer as well as the daemon you're connected to. The number of parallel blocks is defaulted to 1.
+
+```bash
+./gnomonindexer --daemon-rpc-address=127.0.0.1:10102 --num-parallel-blocks=5
+```
+
+## GnomonSC Index Service
+The [gnomonsc](/cmd/gnomonsc/gnomonsc.go) command line interface allows for setting up an index service which will index SCs based on an input search filter (or all if not defined) and store the SC height, owner and scid within the [contract](/cmd/gnomonsc/contracts/contract.bas). Today this is handled by a specific gnomon address which is more widely consumed throughout this package for things such as fastsync etc.
+
+This configuration is pretty bruteforce in nature to define all of the SCID details that are relevant within another SC for lookup. Future states of this component may include a more chunked approach which could potentially be stored off-chain for consumption, however plans and roadmap for that is still a work in progress.
+
+### Running the GnomonSC Index Service
+
+```bash
+# We are assuming that a daemon, wallet (with no username/pwd [TODO: not ideal and do not use anything outside of your same system]), and gnomon indexer are running
+# Say we want to auto-index any SCs that match sending an asset in any form
+./gnomonsc --daemon-rpc-address=127.0.0.1:10102 --wallet-rpc-address=127.0.0.1:10103 --gnomon-api-address=127.0.0.1:8082 --block-deploy-buffer=5 --search-filter="SEND_ASSET_TO_ADDRESS"
 ```

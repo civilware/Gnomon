@@ -32,6 +32,7 @@ type GnomonServer struct {
 	Closing           bool
 	DaemonEndpoint    string
 	RunMode           string
+	DBType            string
 	MBLLookup         bool
 }
 
@@ -55,7 +56,8 @@ Options:
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync=<false>	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
-  --ramstore=<false>	True/false value to define if the db will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
+  --dbtype=<boltdb>	Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. --ramstore can only be valid with gravdb. Defaults to boltdb.
+  --ramstore=<false>	True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>	Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)`
 
 var Exit_In_Progress = make(chan bool)
@@ -63,7 +65,7 @@ var Exit_In_Progress = make(chan bool)
 var closeondisconnect bool
 var fastsync bool
 var ramstore bool
-var version = "0.1.1"
+var version = "0.1.2"
 
 var RLI *readline.Instance
 
@@ -186,8 +188,18 @@ func main() {
 		}
 	}
 
+	Gnomon.DBType = "boltdb"
+	if arguments["--dbtype"] != nil {
+		if arguments["--dbtype"] == "boltdb" || arguments["--dbtype"] == "gravdb" {
+			Gnomon.RunMode = arguments["--dbtype"].(string)
+		} else {
+			log.Fatalf("ERR - dbtype must be either 'boltdb' or 'gravdb'")
+			return
+		}
+	}
+
 	// Uses RAM store for grav db
-	if arguments["--ramstore"] != nil {
+	if arguments["--ramstore"] != nil && Gnomon.DBType == "gravdb" {
 		ramstorestr := arguments["--ramstore"].(string)
 		if ramstorestr == "true" {
 			ramstore = true
@@ -196,13 +208,37 @@ func main() {
 
 	// Database
 	var Graviton_backend *storage.GravitonStore
+	var Bbs_backend *storage.BboltStore
 	var csearch_filter string
-	if ramstore {
-		Graviton_backend, err = storage.NewGravDBRAM("25ms")
-		if err != nil {
-			log.Fatalf("[Main] Err creating gravdb: %v", err)
+
+	switch Gnomon.DBType {
+	case "gravdb":
+		if ramstore {
+			Graviton_backend, err = storage.NewGravDBRAM("25ms")
+			if err != nil {
+				log.Fatalf("[Main] Err creating gravdb: %v", err)
+			}
+		} else {
+			var shasum string
+			if len(search_filter) == 0 {
+				shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
+			} else {
+				csearch_filter = strings.Join(search_filter, sf_separator)
+				shasum = fmt.Sprintf("%x", sha1.Sum([]byte(csearch_filter)))
+			}
+			db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
+			current_path, err := os.Getwd()
+			if err != nil {
+				log.Printf("%v\n", err)
+			}
+			db_path := filepath.Join(current_path, db_folder)
+			Graviton_backend, err = storage.NewGravDB(db_path, "25ms")
+			if err != nil {
+				log.Fatalf("[Main] Err creating gravdb: %v", err)
+			}
 		}
-	} else {
+
+	case "boltdb":
 		var shasum string
 		if len(search_filter) == 0 {
 			shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))
@@ -210,16 +246,13 @@ func main() {
 			csearch_filter = strings.Join(search_filter, sf_separator)
 			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(csearch_filter)))
 		}
-		db_folder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", shasum)
+		db_name := fmt.Sprintf("%s_%s.db", "GNOMON", shasum)
 		current_path, err := os.Getwd()
 		if err != nil {
 			log.Printf("%v\n", err)
 		}
-		db_path := filepath.Join(current_path, db_folder)
-		Graviton_backend, err = storage.NewGravDB(db_path, "25ms")
-		if err != nil {
-			log.Fatalf("[Main] Err creating gravdb: %v", err)
-		}
+		db_path := filepath.Join(current_path, db_name)
+		Bbs_backend, err = storage.NewBBoltDB(db_path, db_name)
 	}
 
 	// API
@@ -237,11 +270,11 @@ func main() {
 		MBLLookup:            mbl,
 	}
 	// TODO: Add default search filter index of sorts, rather than passing through Graviton_backend object as a whole
-	apis := api.NewApiServer(apic, Graviton_backend)
+	apis := api.NewApiServer(apic, Graviton_backend, Bbs_backend, Gnomon.DBType)
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -292,7 +325,14 @@ func main() {
 				return
 			}
 
-			validatedSCIDs := Graviton_backend.GetAllOwnersAndSCIDs()
+			validatedSCIDs := make(map[string]string)
+			switch Gnomon.DBType {
+			case "gravdb":
+				validatedSCIDs = Graviton_backend.GetAllOwnersAndSCIDs()
+			case "boltdb":
+				validatedSCIDs = Bbs_backend.GetAllOwnersAndSCIDs()
+			}
+
 			gnomon_count := int64(len(validatedSCIDs))
 
 			currheight := defaultIndexer.LastIndexedHeight
@@ -382,57 +422,78 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case command == "listsc":
 			for ki, vi := range g.Indexers {
 				log.Printf("- Indexer '%v'", ki)
-				sclist := vi.Backend.GetAllOwnersAndSCIDs()
+				sclist := make(map[string]string)
+				switch vi.DBType {
+				case "gravdb":
+					sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+				case "boltdb":
+					sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+				}
 				for k, v := range sclist {
 					log.Printf("SCID: %v ; Owner: %v\n", k, v)
 				}
 			}
-		case command == "new_sf":
-			if len(line_parts) >= 2 {
-				nsf := strings.Join(line_parts[1:], " ")
-				nsf_j := strings.Split(nsf, sf_separator)
-				log.Printf("Adding new searchfilter '%v'\n", nsf)
+		/*
+			case command == "new_sf":
+					if len(line_parts) >= 2 {
+						nsf := strings.Join(line_parts[1:], " ")
+						nsf_j := strings.Split(nsf, sf_separator)
+						log.Printf("Adding new searchfilter '%v'\n", nsf)
 
-				// Database
-				var nBackend *storage.GravitonStore
-				if fastsync || ramstore {
-					nBackend, err = storage.NewGravDBRAM("25ms")
-					if err != nil {
-						log.Fatalf("[new_sf] Err creating gravdb: %v", err)
-					}
-				} else {
-					nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
-					nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
-					current_path, err := os.Getwd()
-					if err != nil {
-						log.Printf("%v\n", err)
-					}
-					db_path := filepath.Join(current_path, nDBFolder)
-					log.Printf("Adding new database '%v'\n", db_path)
-					nBackend, err = storage.NewGravDB(db_path, "25ms")
-					if err != nil {
-						log.Fatalf("[new_sf] Err creating gravdb: %v", err)
-					}
-				}
+						// Database
+						var nBackend *storage.GravitonStore
+						if fastsync || ramstore {
+							nBackend, err = storage.NewGravDBRAM("25ms")
+							if err != nil {
+								log.Fatalf("[new_sf] Err creating gravdb: %v", err)
+							}
+						} else {
+							nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
+							nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
+							current_path, err := os.Getwd()
+							if err != nil {
+								log.Printf("%v\n", err)
+							}
+							db_path := filepath.Join(current_path, nDBFolder)
+							log.Printf("Adding new database '%v'\n", db_path)
+							nBackend, err = storage.NewGravDB(db_path, "25ms")
+							if err != nil {
+								log.Fatalf("[new_sf] Err creating gravdb: %v", err)
+							}
+						}
 
-				// Start default indexer based on search_filter params
-				log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
-				nIndexer := indexer.NewIndexer(nBackend, nsf_j, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
-				go nIndexer.StartDaemonMode(1)
-				g.Indexers[nsf] = nIndexer
-			}
+						// Start default indexer based on search_filter params
+						log.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'\n", len(g.Indexers)+1, nsf)
+						nIndexer := indexer.NewIndexer(nBackend, nil, Gnomon.DBType, nsf_j, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
+						go nIndexer.StartDaemonMode(1)
+						g.Indexers[nsf] = nIndexer
+					}
+		*/
 		case command == "listsc_byowner":
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					sclist := make(map[string]string)
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count int64
 					for k, v := range sclist {
 						if v == line_parts[1] {
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
 							for _, invoke := range invokedetails {
-								log.Printf("%v", invoke)
+								//log.Printf("%v", invoke)
+								log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 							}
 							count++
 						}
@@ -449,19 +510,37 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) >= 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count int64
 					for k, v := range sclist {
 						if k == line_parts[1] {
 							log.Printf("SCID: %v ; Owner: %v\n", k, v)
-							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
 							for _, invoke := range invokedetails {
 								//log.Printf("%v\n", invoke)
 								if len(line_parts) == 3 {
 									ca, _ := strconv.Atoi(line_parts[2])
 									if invoke.Height >= int64(ca) {
 										log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
-										scVars := vi.Backend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], invoke.Height)
+										var scVars []*structures.SCIDVariable
+										switch vi.DBType {
+										case "gravdb":
+											scVars = vi.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], invoke.Height)
+										case "boltdb":
+											scVars = vi.BBSBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], invoke.Height)
+										}
 										// TODO: Delete me - temp details for investigation
 										var tfvar []string
 										for _, vsv := range scVars {
@@ -495,9 +574,21 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for ki, vi := range g.Indexers {
 						log.Printf("- Indexer '%v'", ki)
 						var scinstalls []*structures.SCTXParse
-						sclist := vi.Backend.GetAllOwnersAndSCIDs()
+						var sclist map[string]string
+						switch vi.DBType {
+						case "gravdb":
+							sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+						case "boltdb":
+							sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+						}
 						for k, _ := range sclist {
-							invokedetails := vi.Backend.GetAllSCIDInvokeDetails(k)
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
 							i := 0
 							for _, v := range invokedetails {
 								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
@@ -534,7 +625,13 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 1 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count int64
 					for k, _ := range sclist {
 						_, _, cbal := vi.RPC.GetSCVariables(k, vi.ChainHeight)
@@ -566,7 +663,13 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
+					var indexbyentry []*structures.SCTXParse
+					switch vi.DBType {
+					case "gravdb":
+						indexbyentry = vi.GravDBBackend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
+					case "boltdb":
+						indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
+					}
 					var count int64
 					for _, v := range indexbyentry {
 						//log.Printf("%v", v)
@@ -575,7 +678,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 
 					if count == 0 {
-						log.Printf("No SCIDs installed matching %v\n", line_parts[1])
+						log.Printf("No SCID invokes of entrypoint '%v' for %v\n", line_parts[2], line_parts[1])
 					}
 				}
 			} else {
@@ -585,16 +688,34 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 1 { //&& len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count, count2 int64
 					for k, _ := range sclist {
-						indexbyentry := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						var indexbyentry []*structures.SCTXParse
+						switch vi.DBType {
+						case "gravdb":
+							indexbyentry = vi.GravDBBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						case "boltdb":
+							indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						}
 						for _, v := range indexbyentry {
 							//log.Printf("%v", v)
 							log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							count++
 						}
-						indexbyentry2 := vi.Backend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						var indexbyentry2 []*structures.SCTXParse
+						switch vi.DBType {
+						case "gravdb":
+							indexbyentry2 = vi.GravDBBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						case "boltdb":
+							indexbyentry2 = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						}
 						for _, v := range indexbyentry2 {
 							//log.Printf("%v", v)
 							log.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
@@ -614,14 +735,26 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				if len(line_parts) >= 2 {
 					for ki, vi := range g.Indexers {
 						log.Printf("- Indexer '%v'", ki)
-						sclist := vi.Backend.GetAllOwnersAndSCIDs()
+						var sclist map[string]string
+						switch vi.DBType {
+						case "gravdb":
+							sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+						case "boltdb":
+							sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+						}
 						for k, v := range sclist {
 							if len(line_parts) > 2 && len(line_parts[2]) == 64 {
 								if k != line_parts[2] {
 									continue
 								}
 							}
-							indexbypartialsigner := vi.Backend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
+							var indexbypartialsigner []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								indexbypartialsigner = vi.GravDBBackend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
+							case "boltdb":
+								indexbypartialsigner = vi.BBSBackend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
+							}
 							if len(indexbypartialsigner) > 0 {
 								log.Printf("SCID: %v ; Owner: %v\n", k, v)
 							}
@@ -639,18 +772,34 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count int64
 					for k, _ := range sclist {
 						if k == line_parts[1] {
 							var keysstringbyvalue []string
 							var keysuint64byvalue []uint64
 
-							intCheck, err := strconv.Atoi(line_parts[2])
-							if err != nil {
-								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDKeysByValue(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
-							} else {
-								keysstringbyvalue, keysuint64byvalue = vi.Backend.GetSCIDKeysByValue(k, uint64(intCheck), vi.ChainHeight, true)
+							switch vi.DBType {
+							case "gravdb":
+								intCheck, err := strconv.Atoi(line_parts[2])
+								if err != nil {
+									keysstringbyvalue, keysuint64byvalue = vi.GravDBBackend.GetSCIDKeysByValue(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
+								} else {
+									keysstringbyvalue, keysuint64byvalue = vi.GravDBBackend.GetSCIDKeysByValue(k, uint64(intCheck), vi.ChainHeight, true)
+								}
+							case "boltdb":
+								intCheck, err := strconv.Atoi(line_parts[2])
+								if err != nil {
+									keysstringbyvalue, keysuint64byvalue = vi.BBSBackend.GetSCIDKeysByValue(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
+								} else {
+									keysstringbyvalue, keysuint64byvalue = vi.BBSBackend.GetSCIDKeysByValue(k, uint64(intCheck), vi.ChainHeight, true)
+								}
 							}
 
 							for _, skey := range keysstringbyvalue {
@@ -701,18 +850,34 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) >= 3 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					sclist := vi.Backend.GetAllOwnersAndSCIDs()
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
 					var count int64
 					for k, _ := range sclist {
 						if k == line_parts[1] {
 							var valuesstringbykey []string
 							var valuesuint64bykey []uint64
 
-							intCheck, err := strconv.Atoi(line_parts[2])
-							if err != nil {
-								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
-							} else {
-								valuesstringbykey, valuesuint64bykey = vi.Backend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
+							switch vi.DBType {
+							case "gravdb":
+								intCheck, err := strconv.Atoi(line_parts[2])
+								if err != nil {
+									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
+								} else {
+									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
+								}
+							case "boltdb":
+								intCheck, err := strconv.Atoi(line_parts[2])
+								if err != nil {
+									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
+								} else {
+									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
+								}
 							}
 
 							for _, sval := range valuesstringbykey {
@@ -835,7 +1000,13 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					scidinteracts := vi.Backend.GetSCIDInteractionByAddr(line_parts[1])
+					var scidinteracts []string
+					switch vi.DBType {
+					case "gravdb":
+						scidinteracts = vi.GravDBBackend.GetSCIDInteractionByAddr(line_parts[1])
+					case "boltdb":
+						scidinteracts = vi.BBSBackend.GetSCIDInteractionByAddr(line_parts[1])
+					}
 					for _, v := range scidinteracts {
 						log.Printf("%v\n", v)
 					}
@@ -879,16 +1050,32 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case line == "status":
 			for ki, vi := range g.Indexers {
 				log.Printf("- Indexer '%v' - Generating status metrics...", ki)
-				validatedSCIDs := vi.Backend.GetAllOwnersAndSCIDs()
-				gnomon_count := int64(len(validatedSCIDs))
+				var validatedSCIDs map[string]string
+				var regTxCount, burnTxCount, normTxCount, gnomon_count, scTxCount int64
 
-				regTxCount := vi.Backend.GetTxCount("registration")
-				burnTxCount := vi.Backend.GetTxCount("burn")
-				normTxCount := vi.Backend.GetTxCount("normal")
+				switch vi.DBType {
+				case "gravdb":
+					validatedSCIDs = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					gnomon_count = int64(len(validatedSCIDs))
 
-				var scTxCount int64
-				for sc, _ := range validatedSCIDs {
-					scTxCount += int64(len(vi.Backend.GetAllSCIDInvokeDetails(sc)))
+					regTxCount = vi.GravDBBackend.GetTxCount("registration")
+					burnTxCount = vi.GravDBBackend.GetTxCount("burn")
+					normTxCount = vi.GravDBBackend.GetTxCount("normal")
+
+					for sc, _ := range validatedSCIDs {
+						scTxCount += int64(len(vi.GravDBBackend.GetAllSCIDInvokeDetails(sc)))
+					}
+				case "boltdb":
+					validatedSCIDs = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					gnomon_count = int64(len(validatedSCIDs))
+
+					regTxCount = vi.BBSBackend.GetTxCount("registration")
+					burnTxCount = vi.BBSBackend.GetTxCount("burn")
+					normTxCount = vi.BBSBackend.GetTxCount("normal")
+
+					for sc, _ := range validatedSCIDs {
+						scTxCount += int64(len(vi.BBSBackend.GetAllSCIDInvokeDetails(sc)))
+					}
 				}
 
 				log.Printf("GNOMON [%d/%d] R:%d >>\n", vi.LastIndexedHeight, vi.ChainHeight, gnomon_count)

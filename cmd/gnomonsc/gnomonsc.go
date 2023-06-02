@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +28,7 @@ var pollTime time.Duration
 var thAddition int64
 var gnomonIndexes []*structures.GnomonSCIDQuery
 var mux sync.Mutex
-var version = "0.1.1"
+var version = "0.1.2"
 
 var command_line string = `Gnomon
 Gnomon SC Index Registration Service: As the Gnomon SCID owner, you can automatically poll your local gnomon instance for new SCIDs to append to the index SC
@@ -41,7 +42,11 @@ Options:
   --daemon-rpc-address=<127.0.0.1:40402>	Connect to daemon rpc.
   --wallet-rpc-address=<127.0.0.1:40403>	Connect to wallet rpc.
   --gnomon-api-address=<127.0.0.1:8082>	Gnomon api to connect to.
-  --block-deploy-buffer=<10>	Block buffer inbetween SC calls. This is for safety, will be hardcoded to minimum of 2 but can define here any amount (10 default).`
+  --block-deploy-buffer=<10>	Block buffer inbetween SC calls. This is for safety, will be hardcoded to minimum of 2 but can define here any amount (10 default).
+  --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).`
+
+// TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
+const sf_separator = ";;;"
 
 func main() {
 	var err error
@@ -93,6 +98,15 @@ func main() {
 		}
 	}
 
+	var search_filter []string
+	if arguments["--search-filter"] != nil {
+		search_filter_nonarr := arguments["--search-filter"].(string)
+		search_filter = strings.Split(search_filter_nonarr, sf_separator)
+		log.Printf("[Main] Using search filter: %v\n", search_filter)
+	} else {
+		log.Printf("[Main] No search filter defined.. grabbing all.\n")
+	}
+
 	log.Printf("[Main] Using block deploy buffer of '%v' blocks.\n", thAddition)
 
 	// wallet/derod rpc clients
@@ -117,7 +131,7 @@ func main() {
 
 	for {
 		fetchGnomonIndexes(gnomon_api_endpoint)
-		runGnomonIndexer(daemon_rpc_endpoint)
+		runGnomonIndexer(daemon_rpc_endpoint, search_filter)
 		log.Printf("[Main] Round completed. Sleeping 1 minute for next round.")
 		time.Sleep(60 * time.Second)
 	}
@@ -157,7 +171,7 @@ func fetchGnomonIndexes(gnomonendpoint string) {
 	}
 }
 
-func runGnomonIndexer(derodendpoint string) {
+func runGnomonIndexer(derodendpoint string, search_filter []string) {
 	mux.Lock()
 	defer mux.Unlock()
 	log.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
@@ -166,7 +180,7 @@ func runGnomonIndexer(derodendpoint string) {
 		log.Printf("[runGnomonIndexer] Error creating new gravdb: %v", err)
 		return
 	}
-	defaultIndexer := indexer.NewIndexer(graviton_backend, nil, int64(1), derodendpoint, "daemon", false, false, true)
+	defaultIndexer := indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, true)
 	defaultIndexer.StartDaemonMode(1)
 
 	for {
@@ -181,8 +195,11 @@ func runGnomonIndexer(derodendpoint string) {
 	var changes bool
 	var variables []*structures.SCIDVariable
 	variables, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight)
+
 	log.Printf("[runGnomonIndexer] Looping through discovered SCs and checking to see if any are not indexed.")
 	for _, v := range gnomonIndexes {
+		var contains bool
+		var code string
 		i := 0
 		valuesstringbykey, valuesuint64bykey := defaultIndexer.GetSCIDValuesByKey(variables, scid, v.SCID+"height", defaultIndexer.ChainHeight)
 		if len(valuesstringbykey) > 0 {
@@ -193,11 +210,30 @@ func runGnomonIndexer(derodendpoint string) {
 		}
 
 		if i == 0 {
-			changes = true
-			log.Printf("[runGnomonIndexer] SCID has not been indexed - %v ... Indexing now", v.SCID)
-			// Do indexing job here.
-			// TODO: Support for authenticator/user:password rpc login for wallet interactions
-			inputscid(v.SCID, v.Owner, v.Height)
+			// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+			if len(search_filter) == 0 {
+				contains = true
+			} else {
+				_, code, _ = defaultIndexer.RPC.GetSCVariables(v.SCID, defaultIndexer.ChainHeight)
+				// Ensure scCode is not blank (e.g. an invalid scid)
+				if code != "" {
+					for _, sfv := range search_filter {
+						contains = strings.Contains(code, sfv)
+						if contains {
+							// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+							break
+						}
+					}
+				}
+			}
+
+			if contains {
+				changes = true
+				log.Printf("[runGnomonIndexer] SCID has not been indexed - %v ... Indexing now", v.SCID)
+				// Do indexing job here.
+				// TODO: Support for authenticator/user:password rpc login for wallet interactions
+				inputscid(v.SCID, v.Owner, v.Height)
+			}
 		}
 	}
 	if !changes {
