@@ -56,7 +56,7 @@ Options:
   --enable-miniblock-lookup=<false>	True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect=<false>	True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync=<false>	True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
-  --dbtype=<boltdb>	Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. --ramstore can only be valid with gravdb. Defaults to boltdb.
+  --dbtype=<boltdb>	Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore=<false>	True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>	Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)`
 
@@ -191,7 +191,7 @@ func main() {
 	Gnomon.DBType = "boltdb"
 	if arguments["--dbtype"] != nil {
 		if arguments["--dbtype"] == "boltdb" || arguments["--dbtype"] == "gravdb" {
-			Gnomon.RunMode = arguments["--dbtype"].(string)
+			Gnomon.DBType = arguments["--dbtype"].(string)
 		} else {
 			log.Fatalf("ERR - dbtype must be either 'boltdb' or 'gravdb'")
 			return
