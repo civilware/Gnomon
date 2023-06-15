@@ -131,7 +131,7 @@ func main() {
 
 	for {
 		fetchGnomonIndexes(gnomon_api_endpoint)
-		runGnomonIndexer(daemon_rpc_endpoint, search_filter)
+		runGnomonIndexer(daemon_rpc_endpoint, gnomon_api_endpoint, search_filter)
 		log.Printf("[Main] Round completed. Sleeping 1 minute for next round.")
 		time.Sleep(60 * time.Second)
 	}
@@ -171,17 +171,53 @@ func fetchGnomonIndexes(gnomonendpoint string) {
 	}
 }
 
-func runGnomonIndexer(derodendpoint string, search_filter []string) {
+func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter []string) {
 	mux.Lock()
 	defer mux.Unlock()
+	var lastQuery map[string]interface{}
+	var currheight int64
 	log.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
 	graviton_backend, err := storage.NewGravDBRAM("25ms")
 	if err != nil {
 		log.Printf("[runGnomonIndexer] Error creating new gravdb: %v", err)
 		return
 	}
-	defaultIndexer := indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, true)
-	defaultIndexer.StartDaemonMode(1)
+
+	// Get current height from getinfo api to poll current network states. Fallback to slow and steady mode.
+	var defaultIndexer *indexer.Indexer
+	log.Printf("[fetchGnomonIndexes] Getting current height data")
+	rs, err := http.Get("http://" + gnomonendpoint + "/api/getinfo")
+	if err != nil {
+		log.Printf("[fetchGnomonIndexes] gnomon height query err %s\n", err)
+	} else {
+		log.Printf("[fetchGnomonIndexes] Retrieved getinfo data... reading in current height.")
+		b, err := io.ReadAll(rs.Body)
+		if err != nil {
+			log.Printf("[fetchGnomonIndexes] error reading getinfo body %s\n", err)
+		} else {
+			err = json.Unmarshal(b, &lastQuery)
+			if err != nil {
+				log.Printf("[fetchGnomonIndexes] error unmarshalling b %s\n", err)
+			}
+
+			if lastQuery["getinfo"] != nil {
+				for k, v := range lastQuery["getinfo"].(map[string]interface{}) {
+					if k == "height" {
+						currheight = int64(v.(float64))
+					}
+				}
+			}
+		}
+	}
+
+	// If we can gather the current height from /api/getinfo then start-topoheight will be passed and fastsync not used. This saves time to not check all SCIDs from gnomon SC. Otherwise default back to "slow and steady" method.
+	if currheight > 0 {
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, currheight, derodendpoint, "daemon", false, false, false)
+		defaultIndexer.StartDaemonMode(1)
+	} else {
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, true)
+		defaultIndexer.StartDaemonMode(1)
+	}
 
 	for {
 		if defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
