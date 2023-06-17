@@ -1612,7 +1612,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								time.Sleep(writeWait)
 							}
 							indexer.BBSBackend.Writing = 1
-							indexer.BBSBackend.Writer = "IndexInvokes"
+							indexer.BBSBackend.Writer = "IndexInvokesOwnerStore"
 
 							_, err = indexer.BBSBackend.StoreOwner(bl_sctxs[i].Scid, "")
 							if err != nil {
@@ -1707,7 +1707,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									time.Sleep(writeWait)
 								}
 								indexer.BBSBackend.Writing = 1
-								indexer.BBSBackend.Writer = "IndexInvokes"
+								indexer.BBSBackend.Writer = "IndexInvokesDetailsStore"
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
 								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {

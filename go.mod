@@ -5,7 +5,7 @@ go 1.18
 require (
 	github.com/chzyer/readline v1.5.1
 	github.com/creachadair/jrpc2 v0.43.0
-	github.com/deroproject/derohe v0.0.0-20221027103319-358fab62bdf4
+	github.com/deroproject/derohe v0.0.0-20230604143809-765b2db1f482
 	github.com/deroproject/graviton v0.0.0-20220130070622-2c248a53b2e1
 	github.com/docopt/docopt-go v0.0.0-20180111231733-ee0de3bc6815
 	github.com/gorilla/mux v1.8.0
