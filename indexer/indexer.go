@@ -225,7 +225,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 					if indexer.Closing {
 						return
 					}
-					log.Printf("[Indexer-StartDaemonMode-hardcodedscids] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+					//log.Printf("[Indexer-StartDaemonMode-hardcodedscids] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 					time.Sleep(writeWait)
 				}
 				indexer.BBSBackend.Writing = 1
@@ -415,7 +415,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 										if indexer.Closing {
 											return
 										}
-										log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+										//log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 										time.Sleep(writeWait)
 									}
 									indexer.BBSBackend.Writing = 1
@@ -463,7 +463,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 												if indexer.Closing {
 													return
 												}
-												log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+												//log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 												time.Sleep(writeWait)
 											}
 											indexer.BBSBackend.Writing = 1
@@ -631,7 +631,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						if indexer.Closing {
 							return
 						}
-						log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+						//log.Printf("[Indexer-StartDaemonMode-StoreLastIndexHeight] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 						time.Sleep(writeWait)
 					}
 					indexer.BBSBackend.Writing = 1
@@ -895,7 +895,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 			if indexer.Closing {
 				return
 			}
-			log.Printf("[AddSCIDToIndex-StoreAltDBInput] GravitonDB is writing... sleeping for %v...", writeWait)
+			//log.Printf("[AddSCIDToIndex-StoreAltDBInput] GravitonDB is writing... sleeping for %v...", writeWait)
 			time.Sleep(writeWait)
 		}
 		tempdb.Writing = 1
@@ -939,7 +939,7 @@ func (client *Client) Connect(endpoint string) (err error) {
 			Connected = true
 		}
 	} else {
-		log.Printf("[Connect] ERROR connecting to wallet %v\n", err)
+		log.Printf("[Connect] ERROR connecting to endpoint %v\n", err)
 
 		if Connected {
 			log.Printf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws\n", endpoint)
@@ -964,8 +964,22 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns *st
 		return
 	}
 
-	if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
-		return blockTxns, fmt.Errorf("[indexBlock] ERROR - GetBlock failed: %v", err)
+	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
+	var reconnect_count int
+	for {
+		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetBlock", ip, &io); err != nil {
+			//log.Printf("[indexBlock] ERROR - GetBlock failed: %v . Trying again (%v / 5) ", err, reconnect_count)
+			if reconnect_count >= 5 {
+				return blockTxns, fmt.Errorf("[indexBlock] ERROR - GetBlock failed: %v", err)
+			}
+			time.Sleep(1 * time.Second)
+
+			reconnect_count++
+
+			continue
+		}
+
+		break
 	}
 
 	var bl block.Block
@@ -1008,7 +1022,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns *st
 					if indexer.Closing {
 						return
 					}
-					log.Printf("[Indexer-IndexBlock-StoreMiniblockDetailsByHash] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+					//log.Printf("[Indexer-IndexBlock-StoreMiniblockDetailsByHash] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 					time.Sleep(writeWait)
 				}
 
@@ -1065,15 +1079,27 @@ func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns) (bl_sctxs []struc
 
 			inputparam.Tx_Hashes = append(inputparam.Tx_Hashes, blTxns.Tx_hashes[i].String())
 
-			if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
-				log.Printf("[IndexTxn] ERROR - GetTransaction for txid '%v' failed: %v\n", inputparam.Tx_Hashes, err)
-				//return err
-				//continue
-				// TODO - In event indexer.Endpoint is being swapped, this case will fail and you could miss a txn. Need another handle rather than just "assume" skip/move on.
-				wg.Done()
-				// If we error, this could be due to regtxn not valid on pruned node or other reasons. We will just nil the err and then return and move on.
-				err = nil
-				return
+			// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
+			var reconnect_count int
+			for {
+				if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetTransaction", inputparam, &output); err != nil {
+					//log.Printf("[IndexTxn] ERROR - GetTransaction for txid '%v' failed: %v . Trying again (%v / 5)\n", inputparam.Tx_Hashes, err, reconnect_count)
+					if reconnect_count >= 5 {
+						// TODO - In event indexer.Endpoint is being swapped, this case will fail and you could miss a txn. Need another handle rather than just "assume" skip/move on.
+						wg.Done()
+						// If we error, this could be due to regtxn not valid on pruned node or other reasons. We will just nil the err and then return and move on.
+						err = nil
+						log.Printf("[IndexTxn] ERROR - GetTransaction for txid '%v' failed: %v . (%v / 5 times)\n", inputparam.Tx_Hashes, err, reconnect_count)
+						return
+					}
+					time.Sleep(1 * time.Second)
+
+					reconnect_count++
+
+					continue
+				}
+
+				break
 			}
 
 			tx_bin, _ := hex.DecodeString(output.Txs_as_hex[0])
@@ -1163,7 +1189,7 @@ func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns) (bl_sctxs []struc
 										if indexer.Closing {
 											return
 										}
-										log.Printf("[Indexer-IndexTxn-StoreNormalTxWithSCIDByAddr] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+										//log.Printf("[Indexer-IndexTxn-StoreNormalTxWithSCIDByAddr] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 										time.Sleep(writeWait)
 									}
 									indexer.BBSBackend.Writing = 1
@@ -1354,7 +1380,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			if indexer.Closing {
 				return
 			}
-			log.Printf("[Indexer-IndexTxCounts] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+			//log.Printf("[Indexer-IndexTxCounts] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 			time.Sleep(writeWait)
 		}
 		indexer.BBSBackend.Writing = 1
@@ -1507,7 +1533,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								if indexer.Closing {
 									return
 								}
-								log.Printf("[Indexer-IndexInvokes] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+								//log.Printf("[Indexer-IndexInvokes] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 								time.Sleep(writeWait)
 							}
 							indexer.BBSBackend.Writing = 1
@@ -1562,7 +1588,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									if indexer.Closing {
 										return
 									}
-									log.Printf("[Indexer-IndexInvokes-StoreInvalidSCIDDeploys] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+									//log.Printf("[Indexer-IndexInvokes-StoreInvalidSCIDDeploys] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 									time.Sleep(writeWait)
 								}
 								indexer.BBSBackend.Writing = 1
@@ -1608,7 +1634,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								if indexer.Closing {
 									return
 								}
-								log.Printf("[Indexer-IndexInvokes-StoreOwner] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+								//log.Printf("[Indexer-IndexInvokes-StoreOwner] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 								time.Sleep(writeWait)
 							}
 							indexer.BBSBackend.Writing = 1
@@ -1703,7 +1729,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									if indexer.Closing {
 										return
 									}
-									log.Printf("[Indexer-IndexInvokes] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+									//log.Printf("[Indexer-IndexInvokes] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 									time.Sleep(writeWait)
 								}
 								indexer.BBSBackend.Writing = 1
@@ -1771,20 +1797,37 @@ func scidExist(s []string, str string) bool {
 // DERO.GetBlockHeaderByTopoHeight rpc call for returning block hash at a particular topoheight
 func (client *Client) getBlockHash(height uint64) (hash string, err error) {
 	//log.Printf("[getBlockHash] Attempting to get block details at topoheight %v\n", height)
+	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
+	var reconnect_count int
+	for {
+		var err error
 
-	var io rpc.GetBlockHeaderByHeight_Result
-	var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: height}
+		var io rpc.GetBlockHeaderByHeight_Result
+		var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: height}
 
-	if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
-		//log.Printf("[getBlockHash] GetBlockHeaderByTopoHeight failed: %v\n", err)
-		return hash, fmt.Errorf("GetBlockHeaderByTopoHeight failed: %v", err)
-	} else {
-		//log.Printf("[getBlockHash] Retrieved block header from topoheight %v\n", height)
-		//mainnet = !info.Testnet // inverse of testnet is mainnet
-		//log.Printf("%v\n", io)
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
+			//log.Printf("[getBlockHash] %v - GetBlockHeaderByTopoHeight failed: %v . Trying again (%v / 5)\n", height, err, reconnect_count)
+			//return hash, fmt.Errorf("GetBlockHeaderByTopoHeight failed: %v", err)
+
+			// TODO: Perhaps just a .Closing = true call here and then gnomonserver can be polling for any indexers with .Closing then close the rest cleanly. If packaged, then just have to handle themselves w/ .Close()
+			if reconnect_count >= 5 {
+				log.Printf("[getBlockHash] %v - GetBlockHeaderByTopoHeight failed: %v . (%v / 5 times)\n", height, err, reconnect_count)
+				break
+			}
+			time.Sleep(1 * time.Second)
+
+			reconnect_count++
+
+			continue
+		} else {
+			//log.Printf("[getBlockHash] Retrieved block header from topoheight %v\n", height)
+			//mainnet = !info.Testnet // inverse of testnet is mainnet
+			//log.Printf("%v\n", io)
+		}
+
+		hash = io.Block_Header.Hash
+		break
 	}
-
-	hash = io.Block_Header.Hash
 
 	return hash, err
 }
@@ -1806,11 +1849,12 @@ func (indexer *Indexer) getInfo() {
 
 		// collect all the data afresh,  execute rpc to service
 		if err = indexer.RPC.RPC.CallResult(context.Background(), "DERO.GetInfo", nil, &info); err != nil {
-			log.Printf("[getInfo] ERROR - GetInfo failed: %v\n", err)
+			//log.Printf("[getInfo] ERROR - GetInfo failed: %v . Trying again (%v / 5)\n", err, reconnect_count)
 
 			// TODO: Perhaps just a .Closing = true call here and then gnomonserver can be polling for any indexers with .Closing then close the rest cleanly. If packaged, then just have to handle themselves w/ .Close()
 			if reconnect_count >= 5 && indexer.CloseOnDisconnect {
 				indexer.Close()
+				log.Printf("[getInfo] ERROR - GetInfo failed: %v . (%v / 5 times)\n", err, reconnect_count)
 				break
 			}
 			time.Sleep(1 * time.Second)
@@ -1862,7 +1906,7 @@ func (indexer *Indexer) getInfo() {
 							if indexer.Closing {
 								return
 							}
-							log.Printf("[Indexer-getinfo-StoreGetInfoDetails] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+							//log.Printf("[Indexer-getinfo-StoreGetInfoDetails] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 							time.Sleep(writeWait)
 						}
 						indexer.BBSBackend.Writing = 1
@@ -1915,7 +1959,7 @@ func (indexer *Indexer) getInfo() {
 					if indexer.Closing {
 						return
 					}
-					log.Printf("[Indexer-getinfo-StoreGetInfoDetails] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+					//log.Printf("[Indexer-getinfo-StoreGetInfoDetails] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
 					time.Sleep(writeWait)
 				}
 				indexer.BBSBackend.Writing = 1
@@ -1976,9 +2020,24 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 	if client.WS == nil {
 		return
 	}
-	if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-		//log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v\n", scid, err)
-		return variables, code, balances
+
+	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
+	var reconnect_count int
+	for {
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
+			//log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . Trying again (%v / 5)\n", scid, err, reconnect_count)
+			if reconnect_count >= 5 {
+				log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . (%v / 5 times)\n", scid, err, reconnect_count)
+				return variables, code, balances
+			}
+			time.Sleep(1 * time.Second)
+
+			reconnect_count++
+
+			continue
+		}
+
+		break
 	}
 
 	code = getSCResults.Code
@@ -2284,7 +2343,7 @@ func (ind *Indexer) Close() {
 			if ind.Closing {
 				return
 			}
-			log.Printf("[Indexer-Close] BoltDB is writing... sleeping for %v... writer %v...", writeWait, ind.BBSBackend.Writer)
+			//log.Printf("[Indexer-Close] BoltDB is writing... sleeping for %v... writer %v...", writeWait, ind.BBSBackend.Writer)
 			time.Sleep(writeWait)
 		}
 		ind.BBSBackend.Writing = 1
