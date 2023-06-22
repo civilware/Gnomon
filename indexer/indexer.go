@@ -150,7 +150,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			continue
 		}
 
-		scVars, scCode, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight)
+		scVars, scCode, _, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight, nil, nil, nil)
 
 		var contains bool
 
@@ -292,10 +292,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			}
 
 			// All could be future optimized .. for now it's slower but works.
-			variables, code, _ := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight)
-			if len(variables) > 0 {
+			variables, code, _, err := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight, nil, nil, nil)
+			if err == nil && len(variables) > 0 {
 				_ = code
-				keysstring, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
+				keysstring, _, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
 
 				// Check  if keysstring is nil or not to avoid any sort of panics
 				var sigstr string
@@ -353,6 +353,12 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 					}
 				} else {
 					log.Printf("[StartDaemonMode-fastsync] Gnomon SC '%v' code was NOT validated against in-built signature variable. Skipping auto-population of scids.", gnomon_scid)
+				}
+			} else {
+				if err != nil {
+					log.Printf("[StartDaemonMode] Fastsync failed to build GnomonSC index. Error - '%v'. Are you using daemon v139? Syncing from current chain height.", err)
+				} else {
+					log.Printf("[StartDaemonMode] Fastsync failed to build GnomonSC index. Variables returned - '%v'. Are you using daemon v139? Syncing from current chain height.", len(variables))
 				}
 			}
 		}
@@ -727,6 +733,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 		// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
 		treenames = append(treenames, "owner")
 	}
+
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			// Check if already validated
@@ -737,7 +744,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				return
 			} else {
 				// Validate SCID is *actually* a valid SCID
-				scVars, scCode, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight)
+				scVars, scCode, _, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil)
 
 				var contains bool
 
@@ -784,7 +791,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				case "gravdb":
 					for tempdb.Writing == 1 {
 						if indexer.Closing {
-							wg.Done()
 							return
 						}
 						//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
@@ -792,7 +798,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 					}
 
 					if indexer.Closing {
-						wg.Done()
 						return
 					}
 					tempdb.Writing = 1
@@ -846,7 +851,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				case "boltdb":
 					for indexer.BBSBackend.Writing == 1 {
 						if indexer.Closing {
-							wg.Done()
 							return
 						}
 						log.Printf("[Indexer-AddSCIDToIndex] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
@@ -1462,7 +1466,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 					log.Printf("[indexBlock-installsc] SCID %v does not contain the search filter string, moving on.\n", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
-					scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
+					scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
@@ -1604,7 +1608,9 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 				if !scidExist(indexer.ValidatedSCs, bl_sctxs[i].Scid) {
 
 					// Validate SCID is *actually* a valid SCID
-					valVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
+					// This assumes we can return all variables.
+					// TODO: For daemon v139 should we append []string "C" to lookup key C to confirm if >1024 k/v pairs exist?
+					valVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 
 					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 					if len(valVars) > 0 {
@@ -1693,7 +1699,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									}
 
 									// Gets the SC variables (key/value) at a given topoheight and then stores them
-									scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
+									scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 									svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
 									if err != nil {
 										log.Printf("[indexBlock] ERR - storing scid variable details: %v\n", err)
@@ -1750,7 +1756,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									}
 
 									// Gets the SC variables (key/value) at a given topoheight and then stores them
-									scVars, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight)
+									scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 									_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
 									if err != nil {
 										log.Printf("[indexBlock] ERR - storing scid variable details: %v\n", err)
@@ -2011,8 +2017,7 @@ func (indexer *Indexer) getWalletHeight() {
 }
 
 // Gets SC variable details
-func (client *Client) GetSCVariables(scid string, topoheight int64) (variables []*structures.SCIDVariable, code string, balances map[string]uint64) {
-	var err error
+func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 []uint64, keysstring []string, keysbytes [][]byte) (variables []*structures.SCIDVariable, code string, balances map[string]uint64, err error) {
 	//balances = make(map[string]uint64)
 
 	var getSCResults rpc.GetSC_Result
@@ -2025,10 +2030,20 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 	var reconnect_count int
 	for {
 		if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-			//log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . Trying again (%v / 5)\n", scid, err, reconnect_count)
+			// Catch for v139 daemons that reject >1024 var returns and we need to be specific (if defined, otherwise we'll err out after 5 tries)
+			if strings.Contains(err.Error(), "max 1024 variables can be returned") || strings.Contains(err.Error(), "namesc cannot request all variables") {
+				if keysuint64 != nil || keysstring != nil || keysbytes != nil {
+					getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight, KeysUint64: keysuint64, KeysString: keysstring, KeysBytes: keysbytes}
+				} else {
+					// Default to at least return code true and variables false if we run into max var can't be returned (derod v139)
+					getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight}
+				}
+			}
+
+			//log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . Trying again (%v / 5)\n", scid, err, reconnect_count+1)
 			if reconnect_count >= 5 {
 				log.Printf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . (%v / 5 times)\n", scid, err, reconnect_count)
-				return variables, code, balances
+				return variables, code, balances, err
 			}
 			time.Sleep(1 * time.Second)
 
@@ -2102,16 +2117,50 @@ func (client *Client) GetSCVariables(scid string, topoheight int64) (variables [
 		variables = append(variables, currVar)
 	}
 
+	// Derod v139 workaround. Everything that returns normal should always have variables of count at least 1 for 'C', but even if not these should still loop on nil and not produce bad data.
+	// We loop for safety, however returns really should only ever satisfy 1 variable end of the day since 1 key matches to 1 value. But bruteforce it for workaround
+	if len(variables) == 0 {
+		for _, ku := range keysuint64 {
+			currVar := &structures.SCIDVariable{}
+			for _, v := range getSCResults.ValuesUint64 {
+				currVar.Key = ku
+				currVar.Value = v
+				variables = append(variables, currVar)
+			}
+		}
+		for _, ks := range keysstring {
+			currVar := &structures.SCIDVariable{}
+			for _, v := range getSCResults.ValuesString {
+				currVar.Key = ks
+				currVar.Value = v
+				variables = append(variables, currVar)
+			}
+		}
+		for _, kb := range keysbytes {
+			currVar := &structures.SCIDVariable{}
+			for _, v := range getSCResults.ValuesBytes {
+				currVar.Key = kb
+				currVar.Value = v
+				variables = append(variables, currVar)
+			}
+		}
+	}
+
 	balances = getSCResults.Balances
 
-	return variables, code, balances
+	return variables, code, balances, err
 }
 
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)
-func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable, scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64) {
+func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable, scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64, err error) {
 	// If variables were not provided, then fetch them.
 	if len(variables) <= 0 {
-		variables, _, _ = indexer.RPC.GetSCVariables(scid, height)
+		// Can't pass the val interface{} as the input params for getsc only are in reference to key lookup or all variables return (edge in event of v139 daemon)
+		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, nil, nil, nil)
+		if err != nil {
+			log.Printf("[GetSCIDKeysByValue] ERROR during GetSCVariables - %v", err)
+			return
+		}
 	}
 
 	// Switch against the value passed. If it's a uint64 or string
@@ -2158,14 +2207,31 @@ func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable,
 		// Nothing - expect only string/uint64 for value types
 	}
 
-	return keysstring, keysuint64
+	return keysstring, keysuint64, err
 }
 
 // Gets SC values by key at given topoheight who's key equates to a given interface{} (string/uint64)
-func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable, scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64) {
+func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable, scid string, key interface{}, height int64) (valuesstring []string, valuesuint64 []uint64, err error) {
 	// If variables were not provided, then fetch them.
 	if len(variables) <= 0 {
-		variables, _, _ = indexer.RPC.GetSCVariables(scid, height)
+		// Can pass the key interface{} in the input param.
+		var keysuint64 []uint64
+		var keysstring []string
+		var keysbytes [][]byte
+		switch ta := key.(type) {
+		case uint64:
+			keysuint64 = append(keysuint64, ta)
+		case string:
+			keysstring = append(keysstring, ta)
+		default:
+			// Nothing - expect only string/uint64 for value types
+		}
+
+		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, keysuint64, keysstring, keysbytes)
+		if err != nil {
+			log.Printf("[GetSCIDValuesByKey] ERROR during GetSCVariables - %v", err)
+			return
+		}
 	}
 
 	// Switch against the value passed. If it's a uint64 or string
@@ -2212,7 +2278,7 @@ func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable,
 		// Nothing - expect only string/uint64 for value types
 	}
 
-	return valuesstring, valuesuint64
+	return valuesstring, valuesuint64, err
 }
 
 // Converts returned SCIDVariables KEY values who's values equates to a given interface{} (string/uint64)

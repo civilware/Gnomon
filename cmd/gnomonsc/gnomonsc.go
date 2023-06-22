@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -230,14 +231,32 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 
 	var changes bool
 	var variables []*structures.SCIDVariable
-	variables, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight)
+	variables, _, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight, nil, nil, nil)
 
 	log.Printf("[runGnomonIndexer] Looping through discovered SCs and checking to see if any are not indexed.")
-	for _, v := range gnomonIndexes {
+	var perc float64
+	var tperc, intperc int64
+	percStep := 1
+	for k, v := range gnomonIndexes {
+		// Crude percentage output tracker for longer running operations. Remove later, just debugging purposes.
+		perc = (float64(k) / float64(len(gnomonIndexes))) * float64(100)
+		intperc = int64(math.Trunc(perc))
+		if intperc%int64(percStep) == 0 && tperc < intperc {
+			tperc = intperc
+			log.Printf("[runGnomonIndexer] Looping... %v %% - %v / %v", perc, k, len(gnomonIndexes))
+		}
+
 		var contains bool
 		var code string
 		i := 0
-		valuesstringbykey, valuesuint64bykey := defaultIndexer.GetSCIDValuesByKey(variables, scid, v.SCID+"height", defaultIndexer.ChainHeight)
+		// This is slower due to lookup each time, however we need to ensure that every instance is checked as blocks happen and other gnomonsc instances could be indexing
+		// TODO: Need to track mempool for changes as well
+		valuesstringbykey, valuesuint64bykey, err := defaultIndexer.GetSCIDValuesByKey(variables, scid, v.SCID+"height", defaultIndexer.ChainHeight)
+		if err != nil {
+			// Do not attempt to index if err is returned. Possible reasons being daemon connectivity failure etc.
+			log.Printf("[runGnomonIndexer] Skipping index of '%v' this round. GetSCIDValuesByKey errored out - %v", scid, err)
+			continue
+		}
 		if len(valuesstringbykey) > 0 {
 			i++
 		}
@@ -250,7 +269,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 			if len(search_filter) == 0 {
 				contains = true
 			} else {
-				_, code, _ = defaultIndexer.RPC.GetSCVariables(v.SCID, defaultIndexer.ChainHeight)
+				_, code, _, _ = defaultIndexer.RPC.GetSCVariables(v.SCID, defaultIndexer.ChainHeight, nil, nil, nil)
 				// Ensure scCode is not blank (e.g. an invalid scid)
 				if code != "" {
 					for _, sfv := range search_filter {

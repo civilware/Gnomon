@@ -634,7 +634,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					var count int64
 					for k, _ := range sclist {
-						_, _, cbal := vi.RPC.GetSCVariables(k, vi.ChainHeight)
+						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil)
 						var pc int
 						for kb, vb := range cbal {
 							if vb > 0 {
@@ -829,9 +829,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 					intCheck, err := strconv.Atoi(line_parts[2])
 					if err != nil {
-						keysstringbyvalue, keysuint64byvalue = vi.GetSCIDKeysByValue(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
+						keysstringbyvalue, keysuint64byvalue, _ = vi.GetSCIDKeysByValue(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
 					} else {
-						keysstringbyvalue, keysuint64byvalue = vi.GetSCIDKeysByValue(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
+						keysstringbyvalue, keysuint64byvalue, _ = vi.GetSCIDKeysByValue(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
 					}
 
 					for _, skey := range keysstringbyvalue {
@@ -912,9 +912,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 					intCheck, err := strconv.Atoi(line_parts[2])
 					if err != nil {
-						valuesstringbykey, valuesuint64bykey = vi.GetSCIDValuesByKey(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
+						valuesstringbykey, valuesuint64bykey, _ = vi.GetSCIDValuesByKey(variables, line_parts[1], strings.Join(line_parts[2:], " "), vi.ChainHeight)
 					} else {
-						valuesstringbykey, valuesuint64bykey = vi.GetSCIDValuesByKey(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
+						valuesstringbykey, valuesuint64bykey, _ = vi.GetSCIDValuesByKey(variables, line_parts[1], uint64(intCheck), vi.ChainHeight)
 					}
 					for _, sval := range valuesstringbykey {
 						log.Printf("%v\n", sval)
@@ -939,8 +939,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					log.Printf("- Indexer '%v'", ki)
-					variables, code, _ := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight)
-					keysstring, _ := vi.GetSCIDValuesByKey(variables, line_parts[1], "signature", vi.ChainHeight)
+					variables, code, _, _ := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					keysstring, _, _ := vi.GetSCIDValuesByKey(variables, line_parts[1], "signature", vi.ChainHeight)
 
 					// Check  if keysstring is nil or not to avoid any sort of panics
 					var sigstr string
