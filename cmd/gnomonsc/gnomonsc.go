@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"math"
@@ -11,7 +12,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
+
 	"github.com/docopt/docopt-go"
 	"github.com/ybbus/jsonrpc"
 
@@ -243,7 +246,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 		intperc = int64(math.Trunc(perc))
 		if intperc%int64(percStep) == 0 && tperc < intperc {
 			tperc = intperc
-			log.Printf("[runGnomonIndexer] Looping... %v %% - %v / %v", perc, k, len(gnomonIndexes))
+			log.Printf("[runGnomonIndexer] Looping... %.0f %% - %v / %v", perc, k, len(gnomonIndexes))
 		}
 
 		var contains bool
@@ -286,8 +289,61 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				changes = true
 				log.Printf("[runGnomonIndexer] SCID has not been indexed - %v ... Indexing now", v.SCID)
 				// Do indexing job here.
-				// TODO: Support for authenticator/user:password rpc login for wallet interactions
-				inputscid(v.SCID, v.Owner, v.Height)
+
+				// Check txpool to see if current txns exist for indexing of same SCID
+				var txpool []string
+				txpool, err = defaultIndexer.RPC.GetTxPool()
+				if err != nil {
+					log.Printf("[runGnomonIndexer-GetTxPool] ERROR Getting TX Pool - %v . Skipping index of SCID '%v' for safety.\n", err, v.SCID)
+					continue
+				} else {
+					log.Printf("[runGnomonIndexer-GetTxPool] TX Pool List - %v\n", txpool)
+				}
+
+				var chashtxns []crypto.Hash
+				var inputsc bool
+				for _, tx := range txpool {
+					var thash crypto.Hash
+					copy(thash[:], []byte(tx)[:])
+					chashtxns = append(chashtxns, thash)
+				}
+
+				cIndex := &structures.BlockTxns{Topoheight: defaultIndexer.ChainHeight, Tx_hashes: chashtxns}
+				bl_sctxs, _, _, _, err := defaultIndexer.IndexTxn(cIndex, true)
+				if err != nil {
+					log.Printf("[runGnomonIndexer-IndexTxn] ERROR - %v . Skipping index of SCID '%v' for safety.\n", err, v.SCID)
+					continue
+				}
+
+				// If no sc txns, then go ahead and input as nothing is in mempool
+				if len(bl_sctxs) == 0 {
+					inputsc = true
+				} else {
+					var txc int
+					for _, txpv := range bl_sctxs {
+						// Check if any of the mempool txns are for the gnomon SCID
+						if txpv.Scid == scid {
+							// Mempool txn is pending for gnomon SCID. Check payload to see if the SCID matches the intended SCID to be indexed
+							argscid := fmt.Sprintf("%v", txpv.Sc_args.Value("scid", "S"))
+							if argscid == v.SCID {
+								log.Printf("[runGnomonIndexer-inputscid] Skipping index of SCID '%v' as mempool txn '%v' includes SCID, safety.\n", v.SCID, txpv.Txid)
+								txc++
+							} else {
+								log.Printf("[runGnomonIndexer-inputscid] Gnomon SCID found in mempool txn '%v' . SCID '%v' not in the payload, continuing.\n", txpv.Txid, v.SCID)
+							}
+						}
+					}
+					// If no flags raised on a mempool txn matching gnomon scid -> v.SCID . Go ahead and input scid index.
+					if txc == 0 {
+						inputsc = true
+					}
+				}
+
+				if inputsc {
+					log.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'\n", v.SCID)
+					// TODO: Support for authenticator/user:password rpc login for wallet interactions
+					inputscid(v.SCID, v.Owner, v.Height)
+				}
 			}
 		}
 	}

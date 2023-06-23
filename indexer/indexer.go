@@ -581,7 +581,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			// Run through blocks one at a time here to max cpu on a given block if large txns rather than split cpu across go routines of multiple blocks
 			for _, v := range blIndexTxns {
 				if len(v.Tx_hashes) > 0 {
-					c_sctxs, cregTxCount, cburnTxCount, cnormTxCount, err := indexer.IndexTxn(v)
+					c_sctxs, cregTxCount, cburnTxCount, cnormTxCount, err := indexer.IndexTxn(v, false)
 					if err != nil {
 						log.Printf("[StartDaemonMode-mainFOR-IndexTxn] %v - ERROR - IndexTxn(%v) - %v", v.Topoheight, v.Tx_hashes, err)
 						return
@@ -1051,7 +1051,7 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns *st
 	return
 }
 
-func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns) (bl_sctxs []structures.SCTXParse, regTxCount int64, burnTxCount int64, normTxCount int64, err error) {
+func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns, noStore bool) (bl_sctxs []structures.SCTXParse, regTxCount int64, burnTxCount int64, normTxCount int64, err error) {
 	var txslock sync.RWMutex
 
 	var wg sync.WaitGroup
@@ -1172,35 +1172,37 @@ func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns) (bl_sctxs []struc
 						//log.Printf("[indexBlock] TXID '%v' has SCID in payload of '%v' and ring members: %v.", bl.Tx_hashes[i], tx.Payloads[j].SCID, output.Txs[j].Ring[j])
 						for _, v := range output.Txs[0].Ring[j] {
 							//bl_normtxs = append(bl_normtxs, structures.NormalTXWithSCIDParse{Txid: bl.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: tx_fees, Height: int64(bl.Height)})
-							writeWait, _ := time.ParseDuration("20ms")
-							switch indexer.DBType {
-							case "gravdb":
-								if !(indexer.RunMode == "asset") {
-									for indexer.GravDBBackend.Writing == 1 {
-										if indexer.Closing {
-											return
+							if !noStore {
+								writeWait, _ := time.ParseDuration("20ms")
+								switch indexer.DBType {
+								case "gravdb":
+									if !(indexer.RunMode == "asset") {
+										for indexer.GravDBBackend.Writing == 1 {
+											if indexer.Closing {
+												return
+											}
+											//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+											time.Sleep(writeWait)
 										}
-										//log.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-										time.Sleep(writeWait)
+										indexer.GravDBBackend.Writing = 1
+										indexer.GravDBBackend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)}, false)
+										indexer.GravDBBackend.Writing = 0
 									}
-									indexer.GravDBBackend.Writing = 1
-									indexer.GravDBBackend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)}, false)
-									indexer.GravDBBackend.Writing = 0
-								}
-							case "boltdb":
-								if !(indexer.RunMode == "asset") {
-									for indexer.BBSBackend.Writing == 1 {
-										if indexer.Closing {
-											return
+								case "boltdb":
+									if !(indexer.RunMode == "asset") {
+										for indexer.BBSBackend.Writing == 1 {
+											if indexer.Closing {
+												return
+											}
+											//log.Printf("[Indexer-IndexTxn-StoreNormalTxWithSCIDByAddr] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
+											time.Sleep(writeWait)
 										}
-										//log.Printf("[Indexer-IndexTxn-StoreNormalTxWithSCIDByAddr] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
-										time.Sleep(writeWait)
+										indexer.BBSBackend.Writing = 1
+										indexer.BBSBackend.Writer = "IndexTxn"
+										indexer.BBSBackend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)})
+										indexer.BBSBackend.Writing = 0
+										indexer.BBSBackend.Writer = ""
 									}
-									indexer.BBSBackend.Writing = 1
-									indexer.BBSBackend.Writer = "IndexTxn"
-									indexer.BBSBackend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)})
-									indexer.BBSBackend.Writing = 0
-									indexer.BBSBackend.Writer = ""
 								}
 							}
 						}
@@ -1568,7 +1570,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 						}
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
-						//log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
+						log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						log.Printf("[indexBlock-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("20ms")
@@ -1773,7 +1775,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 						}
 
 						//log.Printf("DEBUG -- SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
-						//log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
+						log.Printf("DEBUG -- Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v\n", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						//log.Printf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.\n", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
@@ -1798,6 +1800,34 @@ func scidExist(s []string, str string) bool {
 	}
 
 	return false
+}
+
+// DERO.GetTxPool rpc call for returning current mempool txns
+func (client *Client) GetTxPool() (txlist []string, err error) {
+	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
+	var reconnect_count int
+	for {
+		var err error
+
+		var io rpc.GetTxPool_Result
+
+		if err = client.RPC.CallResult(context.Background(), "DERO.GetTxPool", nil, &io); err != nil {
+			if reconnect_count >= 5 {
+				log.Printf("[getTxPool] GetTxPool failed: %v . (%v / 5 times)\n", err, reconnect_count)
+				break
+			}
+			time.Sleep(1 * time.Second)
+
+			reconnect_count++
+
+			continue
+		}
+
+		txlist = io.Tx_list
+		break
+	}
+
+	return
 }
 
 // DERO.GetBlockHeaderByTopoHeight rpc call for returning block hash at a particular topoheight

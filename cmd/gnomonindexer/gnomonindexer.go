@@ -987,7 +987,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					var h crypto.Hash
 					copy(h[:], []byte(line_parts[1])[:])
 					blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
-					vi.IndexTxn(blTxns)
+					vi.IndexTxn(blTxns, false)
 					if err != nil {
 						log.Printf("Err - %v", err)
 					}
