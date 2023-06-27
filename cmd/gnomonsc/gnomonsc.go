@@ -257,7 +257,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 		valuesstringbykey, valuesuint64bykey, err := defaultIndexer.GetSCIDValuesByKey(variables, scid, v.SCID+"height", defaultIndexer.ChainHeight)
 		if err != nil {
 			// Do not attempt to index if err is returned. Possible reasons being daemon connectivity failure etc.
-			log.Printf("[runGnomonIndexer] Skipping index of '%v' this round. GetSCIDValuesByKey errored out - %v", scid, err)
+			log.Printf("[runGnomonIndexer] Skipping index of '%v' this round. GetSCIDValuesByKey errored out - %v", v.SCID, err)
 			continue
 		}
 		if len(valuesstringbykey) > 0 {

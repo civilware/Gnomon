@@ -2155,6 +2155,10 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 			for _, v := range getSCResults.ValuesUint64 {
 				currVar.Key = ku
 				currVar.Value = v
+				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
+				if strings.Contains(v, "leaf not found") {
+					continue
+				}
 				variables = append(variables, currVar)
 			}
 		}
@@ -2163,6 +2167,10 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 			for _, v := range getSCResults.ValuesString {
 				currVar.Key = ks
 				currVar.Value = v
+				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
+				if strings.Contains(v, "leaf not found") {
+					continue
+				}
 				variables = append(variables, currVar)
 			}
 		}
@@ -2171,6 +2179,10 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 			for _, v := range getSCResults.ValuesBytes {
 				currVar.Key = kb
 				currVar.Value = v
+				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
+				if strings.Contains(v, "leaf not found") {
+					continue
+				}
 				variables = append(variables, currVar)
 			}
 		}
