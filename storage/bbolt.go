@@ -1020,3 +1020,45 @@ func (bbs *BboltStore) GetSCIDInteractionByAddr(addr string) (scids []string) {
 
 	return scids
 }
+
+// Writes to disk RAM-stored data
+func (bbs *BboltStore) StoreAltDBInput(treenames []string, altdb *GravitonStore) (err error) {
+	altss, _ := altdb.DB.LoadSnapshot(0)
+
+	// Build set of grav trees to commit at once after being processed from ram store.
+	tck := make(map[string][]*TreeKV)
+	for _, v := range treenames {
+		alttree, _ := altss.GetTree(v)
+		altc := alttree.Cursor()
+		var altTreeKV []*TreeKV // Just rk & rv which are of type []byte
+		for rk, rv, err := altc.First(); err == nil; rk, rv, err = altc.Next() {
+			temp := &TreeKV{rk, rv}
+			//logger.Printf("[StoreAltDBInput] Looping through ramtree cursor k: '%v'; v: '%v'", temp.k, temp.v)
+			altTreeKV = append(altTreeKV, temp)
+		}
+
+		if v == "owner" {
+			// In boltdb we were unable to use an 'owner' bucket so deemed it 'scowner'. TODO: Iron out logical map of this for other funcs or figure a way all is in parity.
+			tck["scowner"] = altTreeKV
+		} else {
+			tck[v] = altTreeKV
+		}
+	}
+
+	err = bbs.DB.Update(func(tx *bolt.Tx) (err error) {
+		for tn, v := range tck {
+			b, err := tx.CreateBucketIfNotExists([]byte(tn))
+			if err != nil {
+				return fmt.Errorf("bucket: %s", err)
+			}
+
+			for _, tckv := range v {
+				//logger.Printf("[StoreAltDBInput-Update] Adding key %v and value %v to bucket %s.", string(tckv.k), string(tckv.v), tn)
+				err = b.Put(tckv.k, tckv.v)
+			}
+		}
+		return
+	})
+
+	return nil
+}

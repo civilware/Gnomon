@@ -351,7 +351,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						}
 					}
 
-					err := indexer.AddSCIDToIndex(scidstoadd)
+					err := indexer.AddSCIDToIndex(scidstoadd, true)
 					if err != nil {
 						logger.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
 					}
@@ -718,7 +718,7 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 }
 
 // Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
-func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport) (err error) {
+func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport, fastsync bool) (err error) {
 	var wg sync.WaitGroup
 	wg.Add(len(scidstoadd))
 
@@ -728,15 +728,12 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	logger.Printf("[AddSCIDToIndex] Starting - Sorting %v SCIDs to index", len(scidstoadd))
 	var tempdb *storage.GravitonStore
 	var treenames []string
-	switch indexer.DBType {
-	case "gravdb":
-		tempdb, err = storage.NewGravDBRAM("25ms")
-		if err != nil {
-			return fmt.Errorf("[AddSCIDToIndex] Error creating new gravdb: %v", err)
-		}
-		// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
-		treenames = append(treenames, "owner")
+	tempdb, err = storage.NewGravDBRAM("25ms")
+	if err != nil {
+		return fmt.Errorf("[AddSCIDToIndex] Error creating new gravdb: %v", err)
 	}
+	// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
+	treenames = append(treenames, "owner")
 
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
@@ -791,99 +788,65 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				}
 
 				writeWait, _ := time.ParseDuration("20ms")
-				switch indexer.DBType {
-				case "gravdb":
-					for tempdb.Writing == 1 {
-						if indexer.Closing {
-							return
-						}
-						//logger.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
-						time.Sleep(writeWait)
-					}
-
+				for tempdb.Writing == 1 {
 					if indexer.Closing {
 						return
 					}
-					tempdb.Writing = 1
-					var ctrees []*graviton.Tree
-
-					var sochanges bool
-					var sotree *graviton.Tree
-					if v.fsi != nil {
-						sotree, sochanges, err = tempdb.StoreOwner(v.scid, v.fsi.Owner, true)
-					} else {
-						sotree, sochanges, err = tempdb.StoreOwner(v.scid, "", true)
-					}
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing owner: %v", err)
-					} else {
-						if sochanges {
-							ctrees = append(ctrees, sotree)
-						}
-					}
-					svdtree, svdchanges, err := tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight, true)
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v", err)
-					} else {
-						if svdchanges {
-							ctrees = append(ctrees, svdtree)
-						}
-					}
-					if !scidExist(treenames, v.scid+"vars") {
-						treenames = append(treenames, v.scid+"vars")
-					}
-					sihtree, sihchanges, err := tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight, true)
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v", err)
-					} else {
-						if sihchanges {
-							ctrees = append(ctrees, sihtree)
-						}
-					}
-					if !scidExist(treenames, v.scid+"heights") {
-						treenames = append(treenames, v.scid+"heights")
-					}
-					if len(ctrees) > 0 {
-						_, err := tempdb.CommitTrees(ctrees)
-						if err != nil {
-							logger.Printf("[AddSCIDToIndex] ERR - committing trees: %v", err)
-						} else {
-							//logger.Printf("[AddSCIDToIndex] DEBUG - cv [%v]", cv)
-						}
-					}
-					tempdb.Writing = 0
-				case "boltdb":
-					for indexer.BBSBackend.Writing == 1 {
-						if indexer.Closing {
-							return
-						}
-						logger.Printf("[Indexer-AddSCIDToIndex] BoltDB is writing... sleeping for %v... writer %v...", writeWait, indexer.BBSBackend.Writer)
-						time.Sleep(writeWait)
-					}
-					indexer.BBSBackend.Writing = 1
-					indexer.BBSBackend.Writer = "AddSCIDToIndex"
-					if v.fsi != nil {
-						_, err = indexer.BBSBackend.StoreOwner(v.scid, v.fsi.Owner)
-					} else {
-						_, err = indexer.BBSBackend.StoreOwner(v.scid, "")
-					}
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing owner: %v", err)
-					}
-					_, err = indexer.BBSBackend.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight)
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v", err)
-					}
-					if !scidExist(treenames, v.scid+"vars") {
-						treenames = append(treenames, v.scid+"vars")
-					}
-					_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight)
-					if err != nil {
-						logger.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v", err)
-					}
-					indexer.BBSBackend.Writing = 0
-					indexer.BBSBackend.Writer = ""
+					//logger.Printf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+					time.Sleep(writeWait)
 				}
+
+				if indexer.Closing {
+					return
+				}
+				tempdb.Writing = 1
+				var ctrees []*graviton.Tree
+
+				var sochanges bool
+				var sotree *graviton.Tree
+				if v.fsi != nil {
+					sotree, sochanges, err = tempdb.StoreOwner(v.scid, v.fsi.Owner, true)
+				} else {
+					sotree, sochanges, err = tempdb.StoreOwner(v.scid, "", true)
+				}
+				if err != nil {
+					logger.Printf("[AddSCIDToIndex] ERR - storing owner: %v", err)
+				} else {
+					if sochanges {
+						ctrees = append(ctrees, sotree)
+					}
+				}
+				svdtree, svdchanges, err := tempdb.StoreSCIDVariableDetails(v.scid, v.scVars, indexer.ChainHeight, true)
+				if err != nil {
+					logger.Printf("[AddSCIDToIndex] ERR - storing scid variable details: %v", err)
+				} else {
+					if svdchanges {
+						ctrees = append(ctrees, svdtree)
+					}
+				}
+				if !scidExist(treenames, v.scid+"vars") {
+					treenames = append(treenames, v.scid+"vars")
+				}
+				sihtree, sihchanges, err := tempdb.StoreSCIDInteractionHeight(v.scid, indexer.ChainHeight, true)
+				if err != nil {
+					logger.Printf("[AddSCIDToIndex] ERR - storing scid interaction height: %v", err)
+				} else {
+					if sihchanges {
+						ctrees = append(ctrees, sihtree)
+					}
+				}
+				if !scidExist(treenames, v.scid+"heights") {
+					treenames = append(treenames, v.scid+"heights")
+				}
+				if len(ctrees) > 0 {
+					_, err := tempdb.CommitTrees(ctrees)
+					if err != nil {
+						logger.Printf("[AddSCIDToIndex] ERR - committing trees: %v", err)
+					} else {
+						//logger.Printf("[AddSCIDToIndex] DEBUG - cv [%v]", cv)
+					}
+				}
+				tempdb.Writing = 0
 			} else {
 				logger.Printf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v.scid, indexer.ChainHeight)
 			}
@@ -893,7 +856,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	logger.Printf("[AddSCIDToIndex] Done - Sorting %v SCIDs to index", len(scidstoadd))
 	switch indexer.DBType {
 	case "gravdb":
-		// TODO: Sometimes the RAM store does not properly take in all values and are missing some index SCs. To investigate...
 		logger.Printf("[AddSCIDToIndex] Current stored disk: %v", len(indexer.GravDBBackend.GetAllOwnersAndSCIDs()))
 		logger.Printf("[AddSCIDToIndex] Current stored ram: %v", len(tempdb.GetAllOwnersAndSCIDs()))
 
@@ -914,6 +876,24 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 		logger.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
 		logger.Printf("[AddSCIDToIndex] New stored disk: %v", len(indexer.GravDBBackend.GetAllOwnersAndSCIDs()))
 	case "boltdb":
+		logger.Printf("[AddSCIDToIndex] Current stored disk: %v", len(indexer.BBSBackend.GetAllOwnersAndSCIDs()))
+		logger.Printf("[AddSCIDToIndex] Current stored ram: %v", len(tempdb.GetAllOwnersAndSCIDs()))
+
+		logger.Printf("[AddSCIDToIndex] Starting - Committing RAM SCID sort to disk storage...")
+		writeWait, _ := time.ParseDuration("10ms")
+		for tempdb.Writing == 1 || indexer.BBSBackend.Writing == 1 {
+			if indexer.Closing {
+				return
+			}
+			//logger.Printf("[AddSCIDToIndex-StoreAltDBInput] GravitonDB is writing... sleeping for %v...", writeWait)
+			time.Sleep(writeWait)
+		}
+		tempdb.Writing = 1
+		indexer.BBSBackend.Writing = 1
+		indexer.BBSBackend.StoreAltDBInput(treenames, tempdb)
+		tempdb.Writing = 0
+		indexer.BBSBackend.Writing = 0
+		logger.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
 		logger.Printf("[AddSCIDToIndex] New stored disk: %v", len(indexer.BBSBackend.GetAllOwnersAndSCIDs()))
 	}
 

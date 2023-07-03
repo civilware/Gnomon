@@ -1416,10 +1416,6 @@ func (g *GravitonStore) CommitTrees(trees []*graviton.Tree) (cv uint64, err erro
 	return
 }
 
-// ---- End Application Graviton/Backend functions ---- //
-
-// ---- Start TEST Graviton/Backend functions ---- //
-
 // Writes to disk RAM-stored data
 func (g *GravitonStore) StoreAltDBInput(treenames []string, altdb *GravitonStore) (err error) {
 	//store := g.DB
@@ -1485,4 +1481,4 @@ func (g *GravitonStore) StoreAltDBInput(treenames []string, altdb *GravitonStore
 	return nil
 }
 
-// ---- End TEST Graviton/Backend functions ---- //
+// ---- End Application Graviton/Backend functions ---- //

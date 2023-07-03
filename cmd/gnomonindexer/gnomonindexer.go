@@ -1068,7 +1068,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					logger.Printf("- Indexer '%v'", ki)
 					scidstoadd := make(map[string]*structures.FastSyncImport)
 					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-					err = vi.AddSCIDToIndex(scidstoadd)
+					err = vi.AddSCIDToIndex(scidstoadd, false)
 					if err != nil {
 						logger.Printf("Err - %v", err)
 					}
