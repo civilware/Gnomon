@@ -351,7 +351,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						}
 					}
 
-					err := indexer.AddSCIDToIndex(scidstoadd, true)
+					err := indexer.AddSCIDToIndex(scidstoadd)
 					if err != nil {
 						logger.Printf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
 					}
@@ -718,7 +718,7 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 }
 
 // Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
-func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport, fastsync bool) (err error) {
+func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport) (err error) {
 	var wg sync.WaitGroup
 	wg.Add(len(scidstoadd))
 
