@@ -122,8 +122,8 @@ func (wss *WSServer) wsHandleClient(ctx context.Context, c *websocket.Conn, requ
 			return err
 		}
 
-		logger.Printf("Method: %v\n", req.Method)
-		logger.Printf("GnomonSCIDQuery: %v\n", params)
+		logger.Printf("Method: %v", req.Method)
+		logger.Printf("GnomonSCIDQuery: %v", params)
 
 		message := &structures.JSONRpcResp{Id: req.Id, Version: "2.0", Error: nil, Result: "test"}
 		logger.Printf("[wsHandleClient] test Writer")

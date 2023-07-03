@@ -92,7 +92,7 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 
 	_, err = os.Stat(current_path)
 	if os.IsNotExist(err) {
-		logger.Printf("Err - Cannot open store: %v\n", err)
+		logger.Printf("Err - Cannot open store: %v", err)
 		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
@@ -104,11 +104,11 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 	}
 
 	if err != nil {
-		logger.Printf("Err - Cannot open store: %v\n", err)
+		logger.Printf("Err - Cannot open store: %v", err)
 		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
-	//logger.Printf("Initialized: %v\n", current_path)
+	//logger.Printf("Initialized: %v", current_path)
 
 	return nil
 }

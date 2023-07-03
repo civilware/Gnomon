@@ -70,7 +70,7 @@ func main() {
 	arguments, err := docopt.ParseArgs(command_line, nil, version)
 
 	if err != nil {
-		log.Fatalf("[Main] Error while parsing arguments err: %s\n", err)
+		log.Fatalf("[Main] Error while parsing arguments err: %s", err)
 	}
 
 	// setup logging
@@ -83,27 +83,27 @@ func main() {
 		daemon_rpc_endpoint = arguments["--daemon-rpc-address"].(string)
 	}
 
-	logger.Printf("[Main] Using daemon RPC endpoint %s\n", daemon_rpc_endpoint)
+	logger.Printf("[Main] Using daemon RPC endpoint %s", daemon_rpc_endpoint)
 
 	gnomon_api_endpoint := "127.0.0.1:8082"
 	if arguments["--gnomon-api-address"] != nil {
 		gnomon_api_endpoint = arguments["--gnomon-api-address"].(string)
 	}
 
-	logger.Printf("[Main] Using gnomon API endpoint %s\n", gnomon_api_endpoint)
+	logger.Printf("[Main] Using gnomon API endpoint %s", gnomon_api_endpoint)
 
 	wallet_rpc_endpoint := "127.0.0.1:40403"
 	if arguments["--wallet-rpc-address"] != nil {
 		wallet_rpc_endpoint = arguments["--wallet-rpc-address"].(string)
 	}
 
-	logger.Printf("[Main] Using wallet RPC endpoint %s\n", wallet_rpc_endpoint)
+	logger.Printf("[Main] Using wallet RPC endpoint %s", wallet_rpc_endpoint)
 
 	thAddition = int64(10)
 	if arguments["--block-deploy-buffer"] != nil {
 		thAddition, err = strconv.ParseInt(arguments["--block-deploy-buffer"].(string), 10, 64)
 		if err != nil {
-			logger.Fatalf("[Main] ERROR while converting --block-deploy-buffer to int64\n")
+			logger.Fatalf("[Main] ERROR while converting --block-deploy-buffer to int64")
 			return
 		}
 		if thAddition < 2 {
@@ -115,12 +115,12 @@ func main() {
 	if arguments["--search-filter"] != nil {
 		search_filter_nonarr := arguments["--search-filter"].(string)
 		search_filter = strings.Split(search_filter_nonarr, sf_separator)
-		logger.Printf("[Main] Using search filter: %v\n", search_filter)
+		logger.Printf("[Main] Using search filter: %v", search_filter)
 	} else {
-		logger.Printf("[Main] No search filter defined.. grabbing all.\n")
+		logger.Printf("[Main] No search filter defined.. grabbing all.")
 	}
 
-	logger.Printf("[Main] Using block deploy buffer of '%v' blocks.\n", thAddition)
+	logger.Printf("[Main] Using block deploy buffer of '%v' blocks.", thAddition)
 
 	// wallet/derod rpc clients
 	walletRPCClient = jsonrpc.NewClient("http://" + wallet_rpc_endpoint + "/json_rpc")
@@ -158,16 +158,16 @@ func fetchGnomonIndexes(gnomonendpoint string) {
 	logger.Printf("[fetchGnomonIndexes] Getting sc data")
 	rs, err := http.Get("http://" + gnomonendpoint + "/api/indexedscs")
 	if err != nil {
-		logger.Printf("[fetchGnomonIndexes] gnomon query err %s\n", err)
+		logger.Printf("[fetchGnomonIndexes] gnomon query err %s", err)
 	} else {
 		logger.Printf("[fetchGnomonIndexes] Retrieved sc data... reading in and building structures.")
 		b, err := io.ReadAll(rs.Body)
 		if err != nil {
-			logger.Printf("[fetchGnomonIndexes] error reading body %s\n", err)
+			logger.Printf("[fetchGnomonIndexes] error reading body %s", err)
 		} else {
 			err = json.Unmarshal(b, &lastQuery)
 			if err != nil {
-				logger.Printf("[fetchGnomonIndexes] error unmarshalling b %s\n", err)
+				logger.Printf("[fetchGnomonIndexes] error unmarshalling b %s", err)
 			}
 
 			if lastQuery["indexdetails"] != nil {
@@ -200,16 +200,16 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 	logger.Printf("[fetchGnomonIndexes] Getting current height data")
 	rs, err := http.Get("http://" + gnomonendpoint + "/api/getinfo")
 	if err != nil {
-		logger.Printf("[fetchGnomonIndexes] gnomon height query err %s\n", err)
+		logger.Printf("[fetchGnomonIndexes] gnomon height query err %s", err)
 	} else {
 		logger.Printf("[fetchGnomonIndexes] Retrieved getinfo data... reading in current height.")
 		b, err := io.ReadAll(rs.Body)
 		if err != nil {
-			logger.Printf("[fetchGnomonIndexes] error reading getinfo body %s\n", err)
+			logger.Printf("[fetchGnomonIndexes] error reading getinfo body %s", err)
 		} else {
 			err = json.Unmarshal(b, &lastQuery)
 			if err != nil {
-				logger.Printf("[fetchGnomonIndexes] error unmarshalling b %s\n", err)
+				logger.Printf("[fetchGnomonIndexes] error unmarshalling b %s", err)
 			}
 
 			if lastQuery["getinfo"] != nil {
@@ -302,10 +302,10 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				var txpool []string
 				txpool, err = defaultIndexer.RPC.GetTxPool()
 				if err != nil {
-					logger.Printf("[runGnomonIndexer-GetTxPool] ERROR Getting TX Pool - %v . Skipping index of SCID '%v' for safety.\n", err, v.SCID)
+					logger.Printf("[runGnomonIndexer-GetTxPool] ERROR Getting TX Pool - %v . Skipping index of SCID '%v' for safety.", err, v.SCID)
 					continue
 				} else {
-					logger.Printf("[runGnomonIndexer-GetTxPool] TX Pool List - %v\n", txpool)
+					logger.Printf("[runGnomonIndexer-GetTxPool] TX Pool List - %v", txpool)
 				}
 
 				var chashtxns []crypto.Hash
@@ -319,7 +319,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				cIndex := &structures.BlockTxns{Topoheight: defaultIndexer.ChainHeight, Tx_hashes: chashtxns}
 				bl_sctxs, _, _, _, err := defaultIndexer.IndexTxn(cIndex, true)
 				if err != nil {
-					logger.Printf("[runGnomonIndexer-IndexTxn] ERROR - %v . Skipping index of SCID '%v' for safety.\n", err, v.SCID)
+					logger.Printf("[runGnomonIndexer-IndexTxn] ERROR - %v . Skipping index of SCID '%v' for safety.", err, v.SCID)
 					continue
 				}
 
@@ -334,10 +334,10 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 							// Mempool txn is pending for gnomon SCID. Check payload to see if the SCID matches the intended SCID to be indexed
 							argscid := fmt.Sprintf("%v", txpv.Sc_args.Value("scid", "S"))
 							if argscid == v.SCID {
-								logger.Printf("[runGnomonIndexer-inputscid] Skipping index of SCID '%v' as mempool txn '%v' includes SCID, safety.\n", v.SCID, txpv.Txid)
+								logger.Printf("[runGnomonIndexer-inputscid] Skipping index of SCID '%v' as mempool txn '%v' includes SCID, safety.", v.SCID, txpv.Txid)
 								txc++
 							} else {
-								logger.Printf("[runGnomonIndexer-inputscid] Gnomon SCID found in mempool txn '%v' . SCID '%v' not in the payload, continuing.\n", txpv.Txid, v.SCID)
+								logger.Printf("[runGnomonIndexer-inputscid] Gnomon SCID found in mempool txn '%v' . SCID '%v' not in the payload, continuing.", txpv.Txid, v.SCID)
 							}
 						}
 					}
@@ -348,7 +348,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				}
 
 				if inputsc {
-					logger.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'\n", v.SCID)
+					logger.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'", v.SCID)
 					// TODO: Support for authenticator/user:password rpc login for wallet interactions
 					inputscid(v.SCID, v.Owner, v.Height)
 				}
@@ -405,7 +405,7 @@ func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer) {
 	}
 	err = derodRPCClient.CallFor(&gasstr, "DERO.GetGasEstimate", gasestimateparams)
 	if err != nil {
-		logger.Printf("[getGasEstimate] gas estimate err %s\n", err)
+		logger.Printf("[getGasEstimate] gas estimate err %s", err)
 		return
 	} else {
 		logger.Printf("[getGasEstimate] gas estimate results: %v", gasstr)

@@ -76,7 +76,7 @@ func (bbs *BboltStore) GetLastIndexHeight() (topoheight int64, err error) {
 			if v != nil {
 				topoheight, err = strconv.ParseInt(string(v), 10, 64)
 				if err != nil {
-					return fmt.Errorf("[bbs-GetLastIndexHeight] ERR - Error parsing stored int for lastindexheight: %v\n", err)
+					return fmt.Errorf("[bbs-GetLastIndexHeight] ERR - Error parsing stored int for lastindexheight: %v", err)
 				}
 			}
 		}
@@ -84,7 +84,7 @@ func (bbs *BboltStore) GetLastIndexHeight() (topoheight int64, err error) {
 	})
 
 	if topoheight == 0 {
-		logger.Printf("[bbs-GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled\n")
+		logger.Printf("[bbs-GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled")
 	}
 
 	return
@@ -125,7 +125,7 @@ func (bbs *BboltStore) GetTxCount(txType string) (txCount int64) {
 			if v != nil {
 				txCount, err = strconv.ParseInt(string(v), 10, 64)
 				if err != nil {
-					return fmt.Errorf("[bbs-GetLastIndexHeight] ERR - Error parsing stored int for txcount: %v\n", err)
+					return fmt.Errorf("[bbs-GetLastIndexHeight] ERR - Error parsing stored int for txcount: %v", err)
 				}
 			}
 		}
@@ -172,7 +172,7 @@ func (bbs *BboltStore) GetOwner(scid string) string {
 		return string(v)
 	}
 
-	logger.Printf("[GetOwner] No owner for %v\n", scid)
+	logger.Printf("[GetOwner] No owner for %v", scid)
 
 	return ""
 }
