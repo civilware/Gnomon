@@ -20,8 +20,6 @@ import (
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 
-	"github.com/deroproject/derohe/cryptography/crypto"
-
 	"github.com/docopt/docopt-go"
 
 	"github.com/sirupsen/logrus"
@@ -448,13 +446,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				i := 0
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
-
+					var owner string
+					switch vi.DBType {
+					case "gravdb":
+						owner = vi.GravDBBackend.GetOwner(line_parts[1])
+					case "boltdb":
+						owner = vi.BBSBackend.GetOwner(line_parts[1])
+					}
 					_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
 					if err != nil {
 						logger.Errorf("%v", err)
 					}
 
 					if sccode != "" {
+						logger.Printf("SCID: %v ; Owner: %v", line_parts[1], owner)
 						logger.Printf("%s", sccode)
 						i++
 						break
@@ -471,13 +476,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					i := 0
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
-
+						var owner string
+						switch vi.DBType {
+						case "gravdb":
+							owner = vi.GravDBBackend.GetOwner(line_parts[1])
+						case "boltdb":
+							owner = vi.BBSBackend.GetOwner(line_parts[1])
+						}
 						_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
 
 						if sccode != "" {
+							logger.Printf("SCID: %v ; Owner: %v", line_parts[1], owner)
 							logger.Printf("%s", sccode)
 							i++
 							break
@@ -502,13 +514,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				i := 0
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
-
+					var owner string
+					switch vi.DBType {
+					case "gravdb":
+						owner = vi.GravDBBackend.GetOwner(line_parts[1])
+					case "boltdb":
+						owner = vi.BBSBackend.GetOwner(line_parts[1])
+					}
 					vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
 					if err != nil {
 						logger.Errorf("%v", err)
 					}
 
 					if len(vars) > 0 {
+						logger.Printf("SCID: %v ; Owner: %v", line_parts[1], owner)
 						for _, vvar := range vars {
 							if vvar.Key.(string) == "C" {
 								continue
@@ -530,13 +549,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					i := 0
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
-
+						var owner string
+						switch vi.DBType {
+						case "gravdb":
+							owner = vi.GravDBBackend.GetOwner(line_parts[1])
+						case "boltdb":
+							owner = vi.BBSBackend.GetOwner(line_parts[1])
+						}
 						vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
 
 						if len(vars) > 0 {
+							logger.Printf("SCID: %v ; Owner: %v", line_parts[1], owner)
 							for _, vvar := range vars {
 								if vvar.Key.(string) == "C" {
 									continue
@@ -985,10 +1011,12 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							for _, sval := range valuesstringbykey {
 								logger.Printf("%v", sval)
 
-								var h crypto.Hash
-								copy(h[:], []byte(sval)[:])
-								logger.Printf("%v", h.String())
-								logger.Printf("%v", []byte(sval))
+								/*
+									var h crypto.Hash
+									copy(h[:], []byte(sval)[:])
+									logger.Printf("%v", h.String())
+									logger.Printf("%v", []byte(sval))
+								*/
 							}
 							for _, uval := range valuesuint64bykey {
 								logger.Printf("%v", uval)
@@ -1021,11 +1049,13 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for _, sval := range valuesstringbykey {
 						logger.Printf("%v", sval)
 
-						// TOOD: Returning human readable string representation of a txid crypto.Hash returned from above. Perhaps a way to implement this to be discoverable based on length?
-						var h crypto.Hash
-						copy(h[:], []byte(sval)[:])
-						logger.Printf("%v", h.String())
-						logger.Printf("%v", []byte(sval))
+						// TODO: Returning human readable string representation of a txid crypto.Hash returned from above. Perhaps a way to implement this to be discoverable based on length?
+						/*
+							var h crypto.Hash
+							copy(h[:], []byte(sval)[:])
+							logger.Printf("%v", h.String())
+							logger.Printf("%v", []byte(sval))
+						*/
 					}
 					for _, uval := range valuesuint64bykey {
 						logger.Printf("%v", uval)
