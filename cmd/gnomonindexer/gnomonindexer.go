@@ -442,6 +442,124 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					logger.Printf("SCID: %v ; Owner: %v\n", k, v)
 				}
 			}
+		case command == "listsc_code":
+			switch len(line_parts) {
+			case 2:
+				i := 0
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+
+					_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					if err != nil {
+						logger.Errorf("%v", err)
+					}
+
+					if sccode != "" {
+						logger.Printf("%s", sccode)
+						i++
+						break
+					} else {
+						continue
+					}
+				}
+
+				if i == 0 {
+					logger.Printf("SCID '%s' code was unable to be retrieved. Is it installed?", line_parts[1])
+				}
+			case 3:
+				if s, err := strconv.Atoi(line_parts[2]); err == nil {
+					i := 0
+					for ki, vi := range g.Indexers {
+						logger.Printf("- Indexer '%v'", ki)
+
+						_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
+						if err != nil {
+							logger.Errorf("%v", err)
+						}
+
+						if sccode != "" {
+							logger.Printf("%s", sccode)
+							i++
+							break
+						} else {
+							continue
+						}
+					}
+
+					if i == 0 {
+						logger.Printf("SCID '%s' code was unable to be retrieved at height '%v'. Was it installed?", line_parts[1], int64(s))
+					}
+				} else {
+					logger.Errorf("Could not parse '%v' into an int for height", line_parts[2])
+				}
+
+			default:
+				logger.Printf("listsc_code needs one value: single scid\n")
+			}
+		case command == "listsc_variables":
+			switch len(line_parts) {
+			case 2:
+				i := 0
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+
+					vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					if err != nil {
+						logger.Errorf("%v", err)
+					}
+
+					if len(vars) > 0 {
+						for _, vvar := range vars {
+							if vvar.Key.(string) == "C" {
+								continue
+							}
+							logger.Printf("Key: %v ; Value: %v", vvar.Key, vvar.Value)
+						}
+						i++
+						break
+					} else {
+						continue
+					}
+				}
+
+				if i == 0 {
+					logger.Printf("SCID '%s' code was unable to be retrieved. Is it installed?", line_parts[1])
+				}
+			case 3:
+				if s, err := strconv.Atoi(line_parts[2]); err == nil {
+					i := 0
+					for ki, vi := range g.Indexers {
+						logger.Printf("- Indexer '%v'", ki)
+
+						vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
+						if err != nil {
+							logger.Errorf("%v", err)
+						}
+
+						if len(vars) > 0 {
+							for _, vvar := range vars {
+								if vvar.Key.(string) == "C" {
+									continue
+								}
+								logger.Printf("Key: %v ; Value: %v", vvar.Key, vvar.Value)
+							}
+							i++
+							break
+						} else {
+							continue
+						}
+					}
+
+					if i == 0 {
+						logger.Printf("SCID '%s' variables were unable to be retrieved at height '%v'. Was it installed?", line_parts[1], int64(s))
+					}
+				} else {
+					logger.Errorf("Could not parse '%v' into an int for height", line_parts[2])
+				}
+
+			default:
+				logger.Printf("listsc_variables needs one value: single scid\n")
+			}
 		/*
 			case command == "new_sf":
 					if len(line_parts) >= 2 {
@@ -958,27 +1076,29 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments\n")
 			}
-		case command == "index_txn":
-			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
-			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
-				for ki, vi := range g.Indexers {
-					logger.Printf("- Indexer '%v'", ki)
-					scidstoadd := make(map[string]*structures.FastSyncImport)
-					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-					//err = vi.AddSCIDToIndex(scidstoadd)
-					var blTxns *structures.BlockTxns
-					blTxns.Topoheight = 1352506
-					var h crypto.Hash
-					copy(h[:], []byte(line_parts[1])[:])
-					blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
-					vi.IndexTxn(blTxns, false)
-					if err != nil {
-						logger.Printf("Err - %v", err)
+			/*
+				case command == "index_txn":
+					// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
+					if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+						for ki, vi := range g.Indexers {
+							logger.Printf("- Indexer '%v'", ki)
+							scidstoadd := make(map[string]*structures.FastSyncImport)
+							scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
+							//err = vi.AddSCIDToIndex(scidstoadd)
+							var blTxns *structures.BlockTxns
+							blTxns.Topoheight = 1352506
+							var h crypto.Hash
+							copy(h[:], []byte(line_parts[1])[:])
+							blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
+							vi.IndexTxn(blTxns, false)
+							if err != nil {
+								logger.Printf("Err - %v", err)
+							}
+						}
+					} else {
+						logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments\n")
 					}
-				}
-			} else {
-				logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments\n")
-			}
+			*/
 		case command == "getscidlist_byaddr":
 			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
@@ -1096,6 +1216,8 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
 	io.WriteString(w, "\t\033[1mversion\033[0m\t\tShow gnomon version\n")
 	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
+	io.WriteString(w, "\t\033[1mlistsc_code\033[0m\t\tLists SCID code, listsc_code <scid>\n")
+	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
 	//io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>\n")
