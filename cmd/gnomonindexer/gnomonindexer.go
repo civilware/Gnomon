@@ -387,10 +387,12 @@ func filterInput(r rune) (rune, bool) {
 func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 	defer func() {
-		if r := recover(); r != nil {
-			logger.Printf("[Main] Readline_loop err: %v", err)
-			err = fmt.Errorf("crashed")
-		}
+		/*
+			if r := recover(); r != nil {
+				logger.Printf("[Main] Readline_loop err: %v", err)
+				err = fmt.Errorf("crashed")
+			}
+		*/
 
 	}()
 
@@ -1002,9 +1004,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							case "boltdb":
 								intCheck, err := strconv.Atoi(line_parts[2])
 								if err != nil {
-									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
+									valuesstringbykey, valuesuint64bykey = vi.BBSBackend.GetSCIDValuesByKey(k, strings.Join(line_parts[2:], " "), vi.ChainHeight, true)
 								} else {
-									valuesstringbykey, valuesuint64bykey = vi.GravDBBackend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
+									valuesstringbykey, valuesuint64bykey = vi.BBSBackend.GetSCIDValuesByKey(k, uint64(intCheck), vi.ChainHeight, true)
 								}
 							}
 
