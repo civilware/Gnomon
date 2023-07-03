@@ -66,6 +66,8 @@ var Exit_In_Progress = make(chan bool)
 var closeondisconnect bool
 var fastsync bool
 var ramstore bool
+
+// TODO: Implement semver or other
 var version = "0.1.2"
 
 var RLI *readline.Instance
@@ -95,7 +97,7 @@ func main() {
 	// Readline GNOMON
 	RLI, err = readline.NewEx(&readline.Config{
 		Prompt:          "\033[92mGNOMON\033[32m>>>\033[0m ",
-		HistoryFile:     filepath.Join(os.TempDir(), "derod_readline.tmp"),
+		HistoryFile:     filepath.Join(os.TempDir(), "gnomon_readline.tmp"),
 		InterruptPrompt: "^C",
 		EOFPrompt:       "exit",
 
@@ -137,6 +139,7 @@ func main() {
 	}
 
 	sslenabled := false
+	// TODO: Flip to bool
 	if arguments["--enable-api-ssl"] != nil {
 		sslenablestr := arguments["--enable-api-ssl"].(string)
 		if sslenablestr == "true" {
@@ -173,6 +176,7 @@ func main() {
 	}
 
 	mbl := false
+	// TODO: Flip to bool
 	if arguments["--enable-miniblock-lookup"] != nil {
 		mbllookupstr := arguments["--enable-miniblock-lookup"].(string)
 		if mbllookupstr == "true" {
@@ -196,6 +200,7 @@ func main() {
 	}
 
 	// Edge flag to be able to close on disconnect from a daemon after x failures. Can be used for smaller nodes or other areas where you want the API to offline when no new data is ingested/indexed.
+	// TODO: Flip to bool
 	if arguments["--close-on-disconnect"] != nil {
 		closeondisconnectstr := arguments["--close-on-disconnect"].(string)
 		if closeondisconnectstr == "true" {
@@ -204,6 +209,7 @@ func main() {
 	}
 
 	// Starts at current chainheight and retrieves a list of SCIDs to auto-add to index validation list
+	// TODO: Flip to bool
 	if arguments["--fastsync"] != nil {
 		fastsyncstr := arguments["--fastsync"].(string)
 		if fastsyncstr == "true" {
@@ -222,6 +228,7 @@ func main() {
 	}
 
 	// Uses RAM store for grav db
+	// TODO: Flip to bool
 	if arguments["--ramstore"] != nil && Gnomon.DBType == "gravdb" {
 		ramstorestr := arguments["--ramstore"].(string)
 		if ramstorestr == "true" {
