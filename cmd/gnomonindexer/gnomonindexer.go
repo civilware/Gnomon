@@ -387,13 +387,10 @@ func filterInput(r rune) (rune, bool) {
 func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 	defer func() {
-		/*
-			if r := recover(); r != nil {
-				logger.Printf("[Main] Readline_loop err: %v", err)
-				err = fmt.Errorf("crashed")
-			}
-		*/
-
+		if r := recover(); r != nil {
+			logger.Printf("[Main] Readline_loop err: %v", err)
+			err = fmt.Errorf("crashed")
+		}
 	}()
 
 	//restart_loop:
