@@ -1,7 +1,6 @@
 package mbllookup
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 
@@ -10,6 +9,7 @@ import (
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/graviton"
+	"github.com/sirupsen/logrus"
 
 	"github.com/civilware/Gnomon/structures"
 )
@@ -31,17 +31,22 @@ type Storetopofs struct {
 var Connected bool
 var DeroDB = &Derodbstore{}
 
+// local logger
+var logger *logrus.Entry
+
 func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
+	logger = structures.Logger.WithFields(logrus.Fields{})
+
 	var ss *graviton.Snapshot
 	DeroDB.LoadDeroDB()
 	ss, err = DeroDB.Balance_store.LoadSnapshot(0)
 	if err != nil {
-		log.Printf("Err loading snapshot - %v", err)
+		logger.Printf("Err loading snapshot - %v", err)
 		return mblinfo, err
 	}
 	balance_tree, err := ss.GetTree(config.BALANCE_TREE)
 	if err != nil {
-		log.Printf("Error getting balance tree - %v", err)
+		logger.Printf("Error getting balance tree - %v", err)
 		return mblinfo, err
 	}
 
@@ -52,23 +57,23 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 			var acckey crypto.Point
 			err = acckey.DecodeCompressed(key_compressed[:])
 			if err != nil {
-				log.Printf("Err decoding key_compressed")
+				logger.Printf("Err decoding key_compressed")
 				return mblinfo, err
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
-			//log.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
+			//logger.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		} else {
 			var acckey crypto.Point
 			err = acckey.DecodeCompressed(bl.Miner_TX.MinerAddress[:])
 			if err != nil {
-				log.Printf("Err decoding bl.Miner_TX.MinerAddress")
+				logger.Printf("Err decoding bl.Miner_TX.MinerAddress")
 				return mblinfo, err
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
-			//log.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
+			//logger.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		}
 	}
@@ -87,8 +92,8 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 
 	_, err = os.Stat(current_path)
 	if os.IsNotExist(err) {
-		log.Printf("Err - Cannot open store: %v\n", err)
-		log.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
+		logger.Printf("Err - Cannot open store: %v\n", err)
+		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
 
@@ -99,11 +104,11 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 	}
 
 	if err != nil {
-		log.Printf("Err - Cannot open store: %v\n", err)
-		log.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
+		logger.Printf("Err - Cannot open store: %v\n", err)
+		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
-	//log.Printf("Initialized: %v\n", current_path)
+	//logger.Printf("Initialized: %v\n", current_path)
 
 	return nil
 }

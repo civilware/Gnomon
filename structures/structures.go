@@ -6,7 +6,15 @@ import (
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
+	"github.com/sirupsen/logrus"
 )
+
+// global logger
+var Logger logrus.Logger
+
+// After daemon connection will check if mainnet/testnet and adjust accordingly
+const MAINNET_GNOMON_SCID = "a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4"
+const TESTNET_GNOMON_SCID = "c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2"
 
 type SCTXParse struct {
 	Txid       string

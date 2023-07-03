@@ -3,13 +3,13 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/civilware/Gnomon/structures"
+	"github.com/sirupsen/logrus"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -23,9 +23,14 @@ type BboltStore struct {
 	Buckets []string
 }
 
+// local logger
+var logger *logrus.Entry
+
 func NewBBoltDB(dbPath string, dbName string) (*BboltStore, error) {
 	var err error
 	var Bbolt_backend *BboltStore = &BboltStore{}
+
+	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	Bbolt_backend.DB, err = bolt.Open(dbName, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
@@ -79,7 +84,7 @@ func (bbs *BboltStore) GetLastIndexHeight() (topoheight int64, err error) {
 	})
 
 	if topoheight == 0 {
-		log.Printf("[bbs-GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled\n")
+		logger.Printf("[bbs-GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled\n")
 	}
 
 	return
@@ -167,7 +172,7 @@ func (bbs *BboltStore) GetOwner(scid string) string {
 		return string(v)
 	}
 
-	log.Printf("[GetOwner] No owner for %v\n", scid)
+	logger.Printf("[GetOwner] No owner for %v\n", scid)
 
 	return ""
 }
@@ -861,7 +866,7 @@ func (bbs *BboltStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*st
 	for _, v := range mbldetails {
 		_, err := bbs.StoreMiniblockCountByAddress(v.Miner)
 		if err != nil {
-			log.Printf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
+			logger.Printf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
 		}
 	}
 

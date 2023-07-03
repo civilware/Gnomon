@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -13,6 +12,7 @@ import (
 	store "github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 )
 
 type ApiServer struct {
@@ -24,8 +24,14 @@ type ApiServer struct {
 	DBType        string
 }
 
+// local logger
+var logger *logrus.Entry
+
 // Configures a new API server to be used
 func NewApiServer(cfg *structures.APIConfig, gravdbbackend *store.GravitonStore, bbsbackend *store.BboltStore, dbtype string) *ApiServer {
+
+	logger = structures.Logger.WithFields(logrus.Fields{})
+
 	return &ApiServer{
 		Config:        cfg,
 		GravDBBackend: gravdbbackend,
@@ -39,7 +45,7 @@ func (apiServer *ApiServer) Start() {
 
 	apiServer.StatsIntv, _ = time.ParseDuration(apiServer.Config.StatsCollectInterval)
 	statsTimer := time.NewTimer(apiServer.StatsIntv)
-	log.Printf("[API] Set stats collect interval to %v\n", apiServer.StatsIntv)
+	logger.Printf("[API] Set stats collect interval to %v\n", apiServer.StatsIntv)
 
 	apiServer.collectStats()
 
@@ -65,7 +71,7 @@ func (apiServer *ApiServer) Start() {
 
 // Sets up the non-SSL API listener
 func (apiServer *ApiServer) listen() {
-	log.Printf("[API] Starting API on %v\n", apiServer.Config.Listen)
+	logger.Printf("[API] Starting API on %v\n", apiServer.Config.Listen)
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
@@ -80,13 +86,13 @@ func (apiServer *ApiServer) listen() {
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
 	if err != nil {
-		log.Fatalf("[API] Failed to start API: %v\n", err)
+		logger.Fatalf("[API] Failed to start API: %v\n", err)
 	}
 }
 
 // Sets up the SSL API listener
 func (apiServer *ApiServer) listenSSL() {
-	log.Printf("[API] Starting SSL API on %v\n", apiServer.Config.SSLListen)
+	logger.Printf("[API] Starting SSL API on %v\n", apiServer.Config.SSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
@@ -101,19 +107,19 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
 	if err != nil {
-		log.Fatalf("[API] Failed to start SSL API: %v\n", err)
+		logger.Fatalf("[API] Failed to start SSL API: %v\n", err)
 	}
 }
 
 // Sets up a separate getinfo SSL listener. Use cases is for things like benchmark.dero.network and others that may want to consume a https endpoint of derod getinfo or other future command output
 func (apiServer *ApiServer) getInfoListenSSL() {
-	log.Printf("[API] Starting GetInfo SSL API on %v\n", apiServer.Config.GetInfoSSLListen)
+	logger.Printf("[API] Starting GetInfo SSL API on %v\n", apiServer.Config.GetInfoSSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.GetInfoSSLListen, apiServer.Config.GetInfoCertFile, apiServer.Config.GetInfoKeyFile, routerSSL)
 	if err != nil {
-		log.Fatalf("[API] Failed to start GetInfo SSL API: %v\n", err)
+		logger.Fatalf("[API] Failed to start GetInfo SSL API: %v\n", err)
 	}
 }
 
@@ -174,7 +180,6 @@ func (apiServer *ApiServer) collectStats() {
 			if sc_action == "1" {
 				i++
 				scinstalls = append(scinstalls, v)
-				//log.Printf("%v - %v", v.Scid, v.Height)
 			}
 		}
 	}
@@ -241,7 +246,7 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -270,7 +275,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//logger.Printf("[API] URL Param 'scid' is missing. Debugging only.\n")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -279,7 +284,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing.\n")
+		//logger.Printf("[API] URL Param 'address' is missing.\n")
 	} else {
 		address = addresskeys[0]
 	}
@@ -346,7 +351,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -375,11 +380,11 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	var height string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//logger.Printf("[API] URL Param 'scid' is missing. Debugging only.\n")
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Printf("[API] Error serializing API response: %v\n", err)
 		}
 		return
 	} else {
@@ -390,7 +395,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	heightkey, ok := r.URL.Query()["height"]
 
 	if !ok || len(heightkey[0]) < 1 {
-		//log.Printf("URL Param 'height' is missing.\n")
+		//logger.Printf("[API] URL Param 'height' is missing.\n")
 	} else {
 		height = heightkey[0]
 	}
@@ -405,11 +410,11 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		var topoheight int64
 		topoheight, err = strconv.ParseInt(height, 10, 64)
 		if err != nil {
-			log.Printf("Err converting '%v' to int64 - %v", height, err)
+			logger.Printf("[API] Err converting '%v' to int64 - %v", height, err)
 
 			err := json.NewEncoder(writer).Encode(reply)
 			if err != nil {
-				log.Printf("[API] Error serializing API response: %v\n", err)
+				logger.Printf("[API] Error serializing API response: %v\n", err)
 			}
 		}
 
@@ -440,13 +445,13 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		var currVars []*structures.SCIDVariable
 
 		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
-		if scid == "0000000000000000000000000000000000000000000000000000000000000001" {
-			log.Printf("Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
+		if scid == "0000000000000000000000000000000000000000000000000000000000000001" || scid == structures.MAINNET_GNOMON_SCID || scid == structures.TESTNET_GNOMON_SCID {
+			logger.Printf("[API] Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
 			reply["variables"] = variables
 
 			err := json.NewEncoder(writer).Encode(reply)
 			if err != nil {
-				log.Printf("[API] Error serializing API response: %v\n", err)
+				logger.Printf("[API] Error serializing API response: %v\n", err)
 			}
 			return
 		}
@@ -474,7 +479,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -503,7 +508,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		//logger.Printf("[API] URL Param 'scid' is missing. Debugging only.\n")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -512,7 +517,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing.\n")
+		//logger.Printf("[API] URL Param 'address' is missing.\n")
 	} else {
 		address = addresskeys[0]
 	}
@@ -521,7 +526,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Printf("[API] Error serializing API response: %v\n", err)
 		}
 		return
 	}
@@ -545,7 +550,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -568,7 +573,7 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -596,11 +601,11 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 	var blid string
 
 	if !ok || len(blidkeys[0]) < 1 {
-		//log.Printf("URL Param 'blid' is missing. Debugging only.\n")
+		//logger.Printf("[API] URL Param 'blid' is missing. Debugging only.\n")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Printf("[API] Error serializing API response: %v\n", err)
 		}
 		return
 	} else {
@@ -620,7 +625,7 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -648,11 +653,11 @@ func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.
 	var addr string
 
 	if !ok || len(addrkeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing. Debugging only.\n")
+		//logger.Printf("[API] URL Param 'address' is missing. Debugging only.\n")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Printf("[API] Error serializing API response: %v\n", err)
 		}
 		return
 	} else {
@@ -671,7 +676,7 @@ func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -706,7 +711,7 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
@@ -730,7 +735,7 @@ func (apiServer *ApiServer) GetInfo(writer http.ResponseWriter, _ *http.Request)
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Printf("[API] Error serializing API response: %v\n", err)
 	}
 }
 
