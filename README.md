@@ -110,6 +110,9 @@ closeondisconnect := false
 // fastsync - Syncs against gnomon scid for scids and compares against search_filter, starts you at current topoheight
 fastsync := false
 
+// logrus logging init (optional)
+indexer.InitLog(arguments, os.Stdout)
+
 // Indexer
 defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, dbtype, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fastsync)
 ```
