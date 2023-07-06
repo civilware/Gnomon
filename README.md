@@ -31,6 +31,7 @@ Built for the masses.
 - [GnomonIndexer](#gnomonindexer)
 - [GnomonSC Index Service](#gnomonsc-index-service)
   - [Running the GnomonSC Index Service](#running-the-gnomonsc-index-service)
+- [Contributing](#contributing)
 
 ## Using Gnomon As A Package
 Gnomon is written with the expectation that the primary use case would be consuming it as a go package. The basis is to be able to leverage it for your own dApps or other configurations which may need to track specific contracts or data and use it appropriately. You can also use it as a [standalone command line interface](#gnomonindexer).
@@ -209,3 +210,6 @@ This configuration is pretty bruteforce in nature to define all of the SCID deta
 # Say we want to auto-index any SCs that match sending an asset in any form
 ./gnomonsc --daemon-rpc-address=127.0.0.1:10102 --wallet-rpc-address=127.0.0.1:10103 --gnomon-api-address=127.0.0.1:8082 --block-deploy-buffer=5 --search-filter="SEND_ASSET_TO_ADDRESS"
 ```
+
+## Contributing
+Bug fixes, feature requests etc. can be submitted through normal issues on this repository. Feel free to follow the [Pull Request Template](./.github/pull_request_template.md) for any code merges.
