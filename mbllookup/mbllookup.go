@@ -41,39 +41,39 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 	DeroDB.LoadDeroDB()
 	ss, err = DeroDB.Balance_store.LoadSnapshot(0)
 	if err != nil {
-		logger.Printf("Err loading snapshot - %v", err)
+		logger.Errorf("Err loading snapshot - %v", err)
 		return mblinfo, err
 	}
 	balance_tree, err := ss.GetTree(config.BALANCE_TREE)
 	if err != nil {
-		logger.Printf("Error getting balance tree - %v", err)
+		logger.Errorf("Error getting balance tree - %v", err)
 		return mblinfo, err
 	}
 
-	for _, v := range bl.MiniBlocks {
+	for k, v := range bl.MiniBlocks {
 		if !v.Final {
 			_, key_compressed, _, err := balance_tree.GetKeyValueFromHash(v.KeyHash[:16])
 
 			var acckey crypto.Point
 			err = acckey.DecodeCompressed(key_compressed[:])
 			if err != nil {
-				logger.Printf("Err decoding key_compressed")
+				logger.Errorf("Err decoding key_compressed")
 				return mblinfo, err
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
-			//logger.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
+			logger.Debugf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		} else {
 			var acckey crypto.Point
 			err = acckey.DecodeCompressed(bl.Miner_TX.MinerAddress[:])
 			if err != nil {
-				logger.Printf("Err decoding bl.Miner_TX.MinerAddress")
+				logger.Errorf("Err decoding bl.Miner_TX.MinerAddress")
 				return mblinfo, err
 			}
 			astring := rpc.NewAddressFromKeys(&acckey)
 
-			//logger.Printf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
+			logger.Debugf("Height: %v ; Miner: %v ; Index: %v ; Final: %v", bl.Height, astring.String(), k, v.Final)
 			mblinfo = append(mblinfo, &structures.MBLInfo{Hash: v.GetHash().String(), Miner: astring.String()})
 		}
 	}
@@ -92,8 +92,8 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 
 	_, err = os.Stat(current_path)
 	if os.IsNotExist(err) {
-		logger.Printf("Err - Cannot open store: %v", err)
-		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
+		logger.Errorf("Err - Cannot open store: %v", err)
+		logger.Errorf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
 
@@ -104,11 +104,11 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 	}
 
 	if err != nil {
-		logger.Printf("Err - Cannot open store: %v", err)
-		logger.Printf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
+		logger.Errorf("Err - Cannot open store: %v", err)
+		logger.Errorf("Err - with 'enable-miniblock-lookup' set to true, be sure to run this from a directory with a full node!")
 		return err
 	}
-	//logger.Printf("Initialized: %v", current_path)
+	logger.Debugf("[LoadDeroDB] Initialized: %v", current_path)
 
 	return nil
 }

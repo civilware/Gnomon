@@ -866,7 +866,7 @@ func (bbs *BboltStore) StoreMiniblockDetailsByHash(blid string, mbldetails []*st
 	for _, v := range mbldetails {
 		_, err := bbs.StoreMiniblockCountByAddress(v.Miner)
 		if err != nil {
-			logger.Printf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
+			logger.Errorf("[Store] ERR - Error adding miniblock count for address '%v'", v.Miner)
 		}
 	}
 
