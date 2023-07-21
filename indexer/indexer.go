@@ -48,20 +48,21 @@ type SCIDToIndexStage struct {
 }
 
 type Indexer struct {
-	LastIndexedHeight int64
-	ChainHeight       int64
-	SearchFilter      []string
-	GravDBBackend     *storage.GravitonStore
-	BBSBackend        *storage.BboltStore
-	DBType            string
-	Closing           bool
-	RPC               *Client
-	Endpoint          string
-	RunMode           string
-	MBLLookup         bool
-	ValidatedSCs      []string
-	CloseOnDisconnect bool
-	Fastsync          bool
+	LastIndexedHeight      int64
+	ChainHeight            int64
+	SearchFilter           []string
+	GravDBBackend          *storage.GravitonStore
+	BBSBackend             *storage.BboltStore
+	DBType                 string
+	Closing                bool
+	RPC                    *Client
+	Endpoint               string
+	RunMode                string
+	MBLLookup              bool
+	ValidatedSCs           []string
+	CloseOnDisconnect      bool
+	Fastsync               bool
+	ExperimentalSCVarStore bool
 	sync.RWMutex
 }
 
@@ -76,23 +77,24 @@ var Connected bool = false
 // local logger
 var logger *logrus.Entry
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, experimentalscvarstore bool) *Indexer {
 	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
 
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	return &Indexer{
-		LastIndexedHeight: last_indexedheight,
-		SearchFilter:      search_filter,
-		GravDBBackend:     Graviton_backend,
-		BBSBackend:        Bbs_backend,
-		DBType:            dbtype,
-		RPC:               &Client{},
-		Endpoint:          endpoint,
-		RunMode:           runmode,
-		MBLLookup:         mbllookup,
-		CloseOnDisconnect: closeondisconnect,
-		Fastsync:          fastsync,
+		LastIndexedHeight:      last_indexedheight,
+		SearchFilter:           search_filter,
+		GravDBBackend:          Graviton_backend,
+		BBSBackend:             Bbs_backend,
+		DBType:                 dbtype,
+		RPC:                    &Client{},
+		Endpoint:               endpoint,
+		RunMode:                runmode,
+		MBLLookup:              mbllookup,
+		CloseOnDisconnect:      closeondisconnect,
+		Fastsync:               fastsync,
+		ExperimentalSCVarStore: experimentalscvarstore,
 	}
 }
 
@@ -1675,24 +1677,41 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 										}
 									}
 
-									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-									scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
+									if indexer.ExperimentalSCVarStore {
+										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+										scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
 
-									// Gets the SC variables (key/value) at a given topoheight
-									scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+										// Gets the SC variables (key/value) at a given topoheight
+										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 
-									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
-									if err != nil {
-										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
-									} else if len(scVarsStore) > 0 {
-										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-										svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight, true)
+										scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 										if err != nil {
-											logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
-										} else {
-											if svdchanges {
-												ctrees = append(ctrees, svdtree)
+											// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
+											logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+										} else if len(scVarsStore) > 0 {
+											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+											svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight, true)
+											if err != nil {
+												logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+											} else {
+												if svdchanges {
+													ctrees = append(ctrees, svdtree)
+												}
+											}
+										}
+									} else {
+										// Gets the SC variables (key/value) at a given topoheight
+										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+
+										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+										if len(scVars) > 0 {
+											svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
+											if err != nil {
+												logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+											} else {
+												if svdchanges {
+													ctrees = append(ctrees, svdtree)
+												}
 											}
 										}
 									}
@@ -1743,21 +1762,34 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 										return err
 									}
 
-									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-									scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
+									if indexer.ExperimentalSCVarStore {
+										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+										scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
 
-									// Gets the SC variables (key/value) at a given topoheight
-									scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+										// Gets the SC variables (key/value) at a given topoheight
+										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 
-									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
-									if err != nil {
-										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
-									} else if len(scVarsStore) > 0 {
-										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-										_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight)
+										scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 										if err != nil {
-											logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+											// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
+											logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+										} else if len(scVarsStore) > 0 {
+											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+											_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight)
+											if err != nil {
+												logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+											}
+										}
+									} else {
+										// Gets the SC variables (key/value) at a given topoheight
+										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+
+										if len(scVars) > 0 {
+											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+											_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
+											if err != nil {
+												logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+											}
 										}
 									}
 									_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight)

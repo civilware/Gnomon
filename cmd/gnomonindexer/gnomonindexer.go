@@ -59,6 +59,7 @@ Options:
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
+  --enable-experimental-scvarstore     Enables storing of the scid variables per interaction as a difference rather than the entire store. Much less storage usage, however unoptimized diff and will take significantly longer currently. This option will be removed in future.
   --debug     Enables debug logging`
 
 var Exit_In_Progress = make(chan bool)
@@ -215,6 +216,12 @@ func main() {
 		ramstore = true
 	}
 
+	// Enable experimental (to be removed later) sc variable diff storage. Saves space, computation takes time until it is optimized for general use and this option goes away
+	var experimentalscvars bool
+	if arguments["--enable-experimental-scvarstore"] != nil && arguments["--enable-experimental-scvarstore"].(bool) == true {
+		experimentalscvars = true
+	}
+
 	// Database
 	var Graviton_backend *storage.GravitonStore
 	var Bbs_backend *storage.BboltStore
@@ -283,7 +290,7 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, experimentalscvars)
 
 	switch Gnomon.RunMode {
 	case "daemon":
