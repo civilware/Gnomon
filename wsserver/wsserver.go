@@ -77,7 +77,7 @@ func (wss *WSServer) wshandler(w http.ResponseWriter, r *http.Request) {
 		//OriginPatterns: []string{"127.0.0.1:9090", "127.0.0.1:8080"},
 	})
 	if err != nil {
-		logger.Printf("[wshandler] Err on connection being established. %v", err)
+		logger.Errorf("[wshandler] Err on connection being established. %v", err)
 		return
 	}
 
@@ -87,11 +87,11 @@ func (wss *WSServer) wshandler(w http.ResponseWriter, r *http.Request) {
 		logger.Printf("[wshandler] Handling client...")
 		err = wss.wsHandleClient(r.Context(), conn, r)
 		if websocket.CloseStatus(err) == websocket.StatusNormalClosure || websocket.CloseStatus(err) == websocket.StatusGoingAway {
-			logger.Printf("[wshandler] Websocket close status: %v", websocket.CloseStatus(err))
+			logger.Errorf("[wshandler] Websocket close status: %v", websocket.CloseStatus(err))
 			return
 		}
 		if err != nil {
-			logger.Printf("[wshandler] Disconnected %v: %v", r.RemoteAddr, err)
+			logger.Errorf("[wshandler] Disconnected %v: %v", r.RemoteAddr, err)
 			return
 		}
 	}
@@ -106,7 +106,7 @@ func (wss *WSServer) wsHandleClient(ctx context.Context, c *websocket.Conn, requ
 	err = wsjson.Read(ctx, c, &req)
 	if err != nil {
 		if err == io.EOF {
-			logger.Printf("[wsHandleClient] io.EOF - disconnected")
+			logger.Errorf("[wsHandleClient] io.EOF - disconnected")
 		}
 
 		return err
@@ -118,7 +118,7 @@ func (wss *WSServer) wsHandleClient(ctx context.Context, c *websocket.Conn, requ
 
 		err = json.Unmarshal(*req.Params, &params)
 		if err != nil {
-			logger.Printf("[wsHandleClient] Unable to parse params")
+			logger.Errorf("[wsHandleClient] Unable to parse params")
 			return err
 		}
 
@@ -129,15 +129,15 @@ func (wss *WSServer) wsHandleClient(ctx context.Context, c *websocket.Conn, requ
 		logger.Printf("[wsHandleClient] test Writer")
 		err = wsjson.Write(ctx, c, message)
 		if err != nil {
-			logger.Printf("[wsHandleClient] err writing message: err: %v", err)
+			logger.Errorf("[wsHandleClient] err writing message: err: %v", err)
 
-			logger.Printf("[wsHandleClient] Server disconnect request")
+			logger.Errorf("[wsHandleClient] Server disconnect request")
 			return fmt.Errorf("[wsHandleClient] Server disconnect request")
 		}
 	default:
-		logger.Printf("[wsHandleClient] Not login or submit method")
+		logger.Errorf("[wsHandleClient] Not login or submit method")
 
-		logger.Printf("[wsHandleClient] Server disconnect request")
+		logger.Errorf("[wsHandleClient] Server disconnect request")
 		return fmt.Errorf("[wsHandleClient] Server disconnect request")
 	}
 

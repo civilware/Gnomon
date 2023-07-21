@@ -47,25 +47,21 @@ Options:
   -h --help     Show this screen.
   --daemon-rpc-address=<127.0.0.1:40402>    Connect to daemon.
   --api-address=<127.0.0.1:8082>     Host api.
-  --enable-api-ssl=<false>     Enable ssl.
+  --enable-api-ssl     Enable ssl.
   --api-ssl-address=<127.0.0.1:9092>     Host ssl api.
   --get-info-ssl-address=<127.0.0.1:9394>     Host GetInfo ssl api. This is to completely isolate it from gnomon api results as a whole. Normal api endpoints also surface the getinfo call if needed.
   --start-topoheight=<31170>     Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
   --search-filter=<"Function InputStr(input String, varname String) Uint64">     Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
   --runmode=<daemon>     Defines the runmode of gnomon (daemon/wallet/asset). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
-  --enable-miniblock-lookup=<false>     True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
-  --close-on-disconnect=<false>     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
-  --fastsync=<false>     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
+  --enable-miniblock-lookup     True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
+  --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
+  --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
-  --ramstore=<false>     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
+  --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
   --debug     Enables debug logging`
 
 var Exit_In_Progress = make(chan bool)
-
-var closeondisconnect bool
-var fastsync bool
-var ramstore bool
 
 // TODO: Implement semver or other
 var version = "0.1.2"
@@ -138,13 +134,9 @@ func main() {
 		get_info_ssl_endpoint = arguments["--get-info-ssl-address"].(string)
 	}
 
-	sslenabled := false
-	// TODO: Flip to bool
-	if arguments["--enable-api-ssl"] != nil {
-		sslenablestr := arguments["--enable-api-ssl"].(string)
-		if sslenablestr == "true" {
-			sslenabled = true
-		}
+	var sslenabled bool
+	if arguments["--enable-api-ssl"] != nil && arguments["--enable-api-ssl"].(bool) == true {
+		sslenabled = true
 	}
 
 	Gnomon.RunMode = "daemon"
@@ -175,13 +167,9 @@ func main() {
 		logger.Printf("[Main] No search filter defined.. grabbing all.")
 	}
 
-	mbl := false
-	// TODO: Flip to bool
-	if arguments["--enable-miniblock-lookup"] != nil {
-		mbllookupstr := arguments["--enable-miniblock-lookup"].(string)
-		if mbllookupstr == "true" {
-			mbl = true
-		}
+	var mbl bool
+	if arguments["--enable-miniblock-lookup"] != nil && arguments["--enable-miniblock-lookup"].(bool) == true {
+		mbl = true
 
 		err = mbllookup.DeroDB.LoadDeroDB()
 		if err != nil {
@@ -200,21 +188,15 @@ func main() {
 	}
 
 	// Edge flag to be able to close on disconnect from a daemon after x failures. Can be used for smaller nodes or other areas where you want the API to offline when no new data is ingested/indexed.
-	// TODO: Flip to bool
-	if arguments["--close-on-disconnect"] != nil {
-		closeondisconnectstr := arguments["--close-on-disconnect"].(string)
-		if closeondisconnectstr == "true" {
-			closeondisconnect = true
-		}
+	var closeondisconnect bool
+	if arguments["--close-on-disconnect"] != nil && arguments["--close-on-disconnect"].(bool) == true {
+		closeondisconnect = true
 	}
 
 	// Starts at current chainheight and retrieves a list of SCIDs to auto-add to index validation list
-	// TODO: Flip to bool
-	if arguments["--fastsync"] != nil {
-		fastsyncstr := arguments["--fastsync"].(string)
-		if fastsyncstr == "true" {
-			fastsync = true
-		}
+	var fastsync bool
+	if arguments["--fastsync"] != nil && arguments["--fastsync"].(bool) == true {
+		fastsync = true
 	}
 
 	Gnomon.DBType = "boltdb"
@@ -228,12 +210,9 @@ func main() {
 	}
 
 	// Uses RAM store for grav db
-	// TODO: Flip to bool
-	if arguments["--ramstore"] != nil && Gnomon.DBType == "gravdb" {
-		ramstorestr := arguments["--ramstore"].(string)
-		if ramstorestr == "true" {
-			ramstore = true
-		}
+	var ramstore bool
+	if arguments["--ramstore"] != nil && arguments["--ramstore"].(bool) == true && Gnomon.DBType == "gravdb" {
+		ramstore = true
 	}
 
 	// Database
@@ -592,42 +571,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			default:
 				logger.Printf("listsc_variables needs one value: single scid")
 			}
-		/*
-			case command == "new_sf":
-					if len(line_parts) >= 2 {
-						nsf := strings.Join(line_parts[1:], " ")
-						nsf_j := strings.Split(nsf, sf_separator)
-						logger.Printf("Adding new searchfilter '%v'", nsf)
-
-						// Database
-						var nBackend *storage.GravitonStore
-						if fastsync || ramstore {
-							nBackend, err = storage.NewGravDBRAM("25ms")
-							if err != nil {
-								logger.Fatalf("[new_sf] Err creating gravdb: %v", err)
-							}
-						} else {
-							nShasum := fmt.Sprintf("%x", sha1.Sum([]byte(nsf)))
-							nDBFolder := fmt.Sprintf("gnomondb\\%s_%s", "GNOMON", nShasum)
-							current_path, err := os.Getwd()
-							if err != nil {
-								logger.Printf("%v", err)
-							}
-							db_path := filepath.Join(current_path, nDBFolder)
-							logger.Printf("Adding new database '%v'", db_path)
-							nBackend, err = storage.NewGravDB(db_path, "25ms")
-							if err != nil {
-								logger.Fatalf("[new_sf] Err creating gravdb: %v", err)
-							}
-						}
-
-						// Start default indexer based on search_filter params
-						logger.Printf("Adding new indexer. ID: '%v'; - SearchFilter: '%v'", len(g.Indexers)+1, nsf)
-						nIndexer := indexer.NewIndexer(nBackend, nil, Gnomon.DBType, nsf_j, 0, g.DaemonEndpoint, g.RunMode, g.MBLLookup, closeondisconnect, fastsync)
-						go nIndexer.StartDaemonMode(1)
-						g.Indexers[nsf] = nIndexer
-					}
-		*/
 		case command == "listsc_byowner":
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
 				for ki, vi := range g.Indexers {
