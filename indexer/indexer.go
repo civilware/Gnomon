@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -2431,7 +2432,170 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 		return
 	}
 
+	// Create RAM gravdb store with two trees then diff said trees
+	logger.Printf("[DiffSCIDVariables] Starting tempdb diff...")
+	var tempdb *storage.GravitonStore
+	tempdb, err = storage.NewGravDBRAM("25ms")
+	if err != nil {
+		logger.Errorf("[DiffSCIDVariables] Error creating new temp gravdb for diff: %v", err)
+		return
+	}
+
+	// Handle storing varset1
+	store := tempdb.DB
+	ss, err := store.LoadSnapshot(0) // load most recent snapshot
+	if err != nil {
+		return
+	}
+
+	treename := "varset1"
+	tree, _ := ss.GetTree(treename)
+	for _, vs1 := range varset1 {
+		switch ckey := vs1.Key.(type) {
+		case uint64:
+			uintkey, err := json.Marshal(ckey)
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
+			switch cval := vs1.Value.(type) {
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree.Put(uintkey, uintval) // insert a value
+			case string:
+				strval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree.Put(uintkey, strval) // insert a value
+			}
+		case string:
+			strkey, err := json.Marshal(ckey)
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
+			switch cval := vs1.Value.(type) {
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree.Put(strkey, uintval) // insert a value
+			case string:
+				strval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree.Put(strkey, strval) // insert a value
+			}
+		default:
+			// Do nothing
+		}
+	}
+	// End storing varset1
+
+	// Handle storing varset2
+	treename2 := "varset2"
+	tree2, _ := ss.GetTree(treename2)
+	for _, vs2 := range varset2 {
+		switch ckey := vs2.Key.(type) {
+		case uint64:
+			uintkey, err := json.Marshal(ckey)
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
+			switch cval := vs2.Value.(type) {
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree2.Put(uintkey, uintval) // insert a value
+			case string:
+				strval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree2.Put(uintkey, strval) // insert a value
+			}
+		case string:
+			strkey, err := json.Marshal(ckey)
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
+			switch cval := vs2.Value.(type) {
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree2.Put(strkey, uintval) // insert a value
+			case string:
+				strval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+				tree2.Put(strkey, strval) // insert a value
+			}
+		default:
+			// Do nothing
+		}
+	}
+	_, cerr := graviton.Commit(tree, tree2)
+	if cerr != nil {
+		logger.Errorf("[Graviton] ERROR: %v", cerr)
+		return
+	}
+	// End storing
+
+	// Diff trees
+	insert_map_actual := map[string]string{}
+	delete_map_actual := map[string]string{}
+	modify_map_actual := map[string]string{}
+
+	insert_handler := func(k, v []byte) {
+		insert_map_actual[string(k)] = string(v)
+	}
+	delete_handler := func(k, v []byte) {
+		delete_map_actual[string(k)] = string(v)
+	}
+
+	modify_handler := func(k, v []byte) {
+		modify_map_actual[string(k)] = string(v)
+	}
+
+	store2 := tempdb.DB
+	ss2, err := store2.LoadSnapshot(0) // load most recent snapshot
+	if err != nil {
+		return
+	}
+	varset1_tree, _ := ss2.GetTree("varset1")
+	varset2_tree, _ := ss2.GetTree("varset2")
+
+	err = graviton.Diff(varset1_tree, varset2_tree, delete_handler, modify_handler, insert_handler)
+
+	logger.Printf("[DiffSCIDVariables] delete: %v", delete_map_actual)
+	logger.Printf("[DiffSCIDVariables] modify: %v", modify_map_actual)
+	logger.Printf("[DiffSCIDVariables] insert: %v", insert_map_actual)
+	logger.Printf("[DiffSCIDVariables] Ending tempdb diff...")
+	// End Diff trees
+
 	// Crude looping. Perhaps some optimization to be implemented here. Large variable sets will take longer and longer to loop
+	logger.Printf("[DiffSCIDVariables] Starting crude loops...")
 	var diffsetkeys []interface{}
 	for i := 0; i < 2; i++ {
 		for _, vs1 := range varset1 {
@@ -2490,6 +2654,8 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			varset1, varset2 = varset2, varset1
 		}
 	}
+
+	logger.Printf("[DiffSCIDVariables] Ending crude loops...")
 
 	return
 }
