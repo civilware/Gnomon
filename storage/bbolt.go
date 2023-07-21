@@ -509,31 +509,9 @@ func (bbs *BboltStore) StoreSCIDVariableDetails(scid string, variables []*struct
 }
 
 // Gets SC variables at a given topoheight
-func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheight int64) (variables []*structures.SCIDVariable) {
-	var v []byte
-	bName := scid + "vars"
-
-	bbs.DB.View(func(tx *bolt.Tx) (err error) {
-		b := tx.Bucket([]byte(bName))
-		if b != nil {
-			key := strconv.FormatInt(topoheight, 10)
-			v = b.Get([]byte(key))
-		}
-
-		return
-	})
-
-	if v != nil {
-		_ = json.Unmarshal(v, &variables)
-		return
-	}
-
-	return
-}
-
-// Gets SC variables at all topoheights
-func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) map[int64][]*structures.SCIDVariable {
+func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheight int64) (hVars []*structures.SCIDVariable) {
 	results := make(map[int64][]*structures.SCIDVariable)
+	var heights []int64
 
 	bName := scid + "vars"
 
@@ -546,6 +524,7 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) map[int64][]*struc
 			for k, v := c.First(); err == nil; k, v = c.Next() {
 				if k != nil && v != nil {
 					topoheight, _ := strconv.ParseInt(string(k), 10, 64)
+					heights = append(heights, topoheight)
 					var variables []*structures.SCIDVariable
 					_ = json.Unmarshal(v, &variables)
 					results[topoheight] = variables
@@ -558,7 +537,97 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) map[int64][]*struc
 		return
 	})
 
-	return results
+	if results != nil {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(heights, func(i, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		for k, v := range heights {
+			if v > topoheight {
+				// Only return all the data relevant to up to the defined height
+				break
+			}
+			for _, vs := range results[v] {
+				kfound := false
+				for _, va := range hVars {
+					if va.Key == vs.Key {
+						// If key already exists in tracked slice, set the 'latest' value to the value
+						kfound = true
+
+						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
+
+						va.Value = vs.Value
+						break
+					}
+				}
+				if !kfound {
+					hVars = append(hVars, vs)
+				}
+			}
+		}
+	}
+
+	return
+}
+
+// Gets SC variables at all topoheights
+func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structures.SCIDVariable) {
+	results := make(map[int64][]*structures.SCIDVariable)
+	var heights []int64
+
+	bName := scid + "vars"
+
+	bbs.DB.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket([]byte(bName))
+		if b != nil {
+
+			c := b.Cursor()
+
+			for k, v := c.First(); err == nil; k, v = c.Next() {
+				if k != nil && v != nil {
+					topoheight, _ := strconv.ParseInt(string(k), 10, 64)
+					heights = append(heights, topoheight)
+					var variables []*structures.SCIDVariable
+					_ = json.Unmarshal(v, &variables)
+					results[topoheight] = variables
+				} else {
+					break
+				}
+			}
+		}
+
+		return
+	})
+
+	if results != nil {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(heights, func(i, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		for k, v := range heights {
+			for _, vs := range results[v] {
+				kfound := false
+				for _, va := range hVars {
+					if va.Key == vs.Key {
+						// If key already exists in tracked slice, set the 'latest' value to the value
+						kfound = true
+
+						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
+
+						va.Value = vs.Value
+						break
+					}
+				}
+				if !kfound {
+					hVars = append(hVars, vs)
+				}
+			}
+		}
+	}
+
+	return
 }
 
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)

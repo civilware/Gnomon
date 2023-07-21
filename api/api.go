@@ -440,9 +440,8 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	} else {
 		// TODO: Do we need this case? Should we always require a height to be defined so as not to slow the api return due to large dataset? Do we keep but put a limit on return amount?
 
-		variables := make(map[int64][]*structures.SCIDVariable)
+		var variables []*structures.SCIDVariable
 		var scidInteractionHeights []int64
-		var currVars []*structures.SCIDVariable
 
 		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
 		if scid == "0000000000000000000000000000000000000000000000000000000000000001" || scid == structures.MAINNET_GNOMON_SCID || scid == structures.TESTNET_GNOMON_SCID {
@@ -459,18 +458,10 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		switch apiServer.DBType {
 		case "gravdb":
 			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
-
-			for _, h := range scidInteractionHeights {
-				currVars = apiServer.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(scid, h)
-				variables[h] = currVars
-			}
+			variables = apiServer.GravDBBackend.GetAllSCIDVariableDetails(scid)
 		case "boltdb":
 			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
-
-			for _, h := range scidInteractionHeights {
-				currVars = apiServer.BBSBackend.GetSCIDVariableDetailsAtTopoheight(scid, h)
-				variables[h] = currVars
-			}
+			variables = apiServer.BBSBackend.GetAllSCIDVariableDetails(scid)
 		}
 
 		reply["variables"] = variables

@@ -879,44 +879,9 @@ func (g *GravitonStore) StoreSCIDVariableDetails(scid string, variables []*struc
 }
 
 // Gets SC variables at a given topoheight
-func (g *GravitonStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheight int64) (variables []*structures.SCIDVariable) {
-	store := g.DB
-	ss, err := store.LoadSnapshot(0) // load most recent snapshot
-	if err != nil {
-		return
-	}
-
-	treename := scid + "vars"
-	tree, _ := ss.GetTree(treename) // use or create tree named by poolhost in config
-	// Catch/handle a nil tree. TODO: This should gracefully cause shutdown, if we cannot get the previous snapshot data. Also need to handle losing that snapshot, how do we handle.
-	if tree == nil {
-		var terr error
-		logger.Errorf("[Graviton-GetSCIDVariableDetailsAtTopoheight] ERROR: Tree is nil for '%v'. Attempting to rollback 1 snapshot", treename)
-		prevss, preverr := store.LoadSnapshot(ss.GetVersion() - 1)
-		if preverr != nil {
-			return
-		}
-		tree, terr = prevss.GetTree(treename)
-		if tree == nil {
-			logger.Errorf("[Graviton] ERROR: %v", terr)
-			return
-		}
-	}
-	key := strconv.FormatInt(topoheight, 10)
-
-	v, _ := tree.Get([]byte(key))
-
-	if v != nil {
-		_ = json.Unmarshal(v, &variables)
-		return
-	}
-
-	return nil
-}
-
-// Gets SC variables at all topoheights
-func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) (results map[int64][]*structures.SCIDVariable) {
-	results = make(map[int64][]*structures.SCIDVariable)
+func (g *GravitonStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheight int64) (hVars []*structures.SCIDVariable) {
+	results := make(map[int64][]*structures.SCIDVariable)
+	var heights []int64
 
 	store := g.DB
 	ss, err := store.LoadSnapshot(0)
@@ -944,9 +909,108 @@ func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) (results map[int6
 	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
 	for k, v, err := c.First(); err == nil; k, v, err = c.Next() {
 		topoheight, _ := strconv.ParseInt(string(k), 10, 64)
+		heights = append(heights, topoheight)
 		var variables []*structures.SCIDVariable
 		_ = json.Unmarshal(v, &variables)
 		results[topoheight] = variables
+	}
+
+	if results != nil {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(heights, func(i, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		for k, v := range heights {
+			if v > topoheight {
+				// Only return all the data relevant to up to the defined height
+				break
+			}
+			for _, vs := range results[v] {
+				kfound := false
+				for _, va := range hVars {
+					if va.Key == vs.Key {
+						// If key already exists in tracked slice, set the 'latest' value to the value
+						kfound = true
+
+						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
+
+						va.Value = vs.Value
+						break
+					}
+				}
+				if !kfound {
+					hVars = append(hVars, vs)
+				}
+			}
+		}
+	}
+
+	return
+}
+
+// Gets SC variables at all topoheights
+func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) (hVars []*structures.SCIDVariable) {
+	results := make(map[int64][]*structures.SCIDVariable)
+	var heights []int64
+
+	store := g.DB
+	ss, err := store.LoadSnapshot(0)
+	if err != nil {
+		return
+	}
+	treename := scid + "vars"
+	tree, _ := ss.GetTree(treename)
+	// Catch/handle a nil tree. TODO: This should gracefully cause shutdown, if we cannot get the previous snapshot data. Also need to handle losing that snapshot, how do we handle.
+	if tree == nil {
+		var terr error
+		logger.Errorf("[Graviton-GetAllSCIDVariableDetails] ERROR: Tree is nil for '%v'. Attempting to rollback 1 snapshot", treename)
+		prevss, preverr := store.LoadSnapshot(ss.GetVersion() - 1)
+		if preverr != nil {
+			return
+		}
+		tree, terr = prevss.GetTree(treename)
+		if tree == nil {
+			logger.Errorf("[Graviton] ERROR: %v", terr)
+			return
+		}
+	}
+
+	c := tree.Cursor()
+	// Duplicate the LATEST (snapshot 0) to the new DB, this starts the DB over again, but still retaining X number of old DBs for version in future use cases. Here we get the vals before swapping to new db in mem
+	for k, v, err := c.First(); err == nil; k, v, err = c.Next() {
+		topoheight, _ := strconv.ParseInt(string(k), 10, 64)
+		heights = append(heights, topoheight)
+		var variables []*structures.SCIDVariable
+		_ = json.Unmarshal(v, &variables)
+		results[topoheight] = variables
+	}
+
+	if results != nil {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(heights, func(i, j int) bool {
+			return heights[i] < heights[j]
+		})
+
+		for k, v := range heights {
+			for _, vs := range results[v] {
+				kfound := false
+				for _, va := range hVars {
+					if va.Key == vs.Key {
+						// If key already exists in tracked slice, set the 'latest' value to the value
+						kfound = true
+
+						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
+
+						va.Value = vs.Value
+						break
+					}
+				}
+				if !kfound {
+					hVars = append(hVars, vs)
+				}
+			}
+		}
 	}
 
 	return
