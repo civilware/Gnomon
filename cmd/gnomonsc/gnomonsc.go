@@ -34,7 +34,6 @@ var pollTime time.Duration
 var thAddition int64
 var gnomonIndexes []*structures.GnomonSCIDQuery
 var mux sync.Mutex
-var version = "0.1.2"
 
 var command_line string = `Gnomon
 Gnomon SC Index Registration Service: As the Gnomon SCID owner, you can automatically poll your local gnomon instance for new SCIDs to append to the index SC
@@ -68,7 +67,7 @@ func main() {
 	ringsize = uint64(2)
 
 	// Inspect argument(s)
-	arguments, err := docopt.ParseArgs(command_line, nil, version)
+	arguments, err := docopt.ParseArgs(command_line, nil, structures.Version.String())
 
 	if err != nil {
 		log.Fatalf("[Main] Error while parsing arguments err: %s", err)

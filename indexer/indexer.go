@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1547,8 +1548,8 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							indexer.BBSBackend.Writer = ""
 						}
 
-						//logger.Debugf("SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
-						logger.Debugf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
+						//logger.Debugf("[IndexInvokes] SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
+						logger.Debugf("[IndexInvokes] Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						logger.Debugf("[indexBlock-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("20ms")
@@ -1804,8 +1805,8 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							}
 						}
 
-						//logger.Debugf("SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
-						logger.Debugf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
+						//logger.Debugf("[IndexInvokes] SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &currsctx)
+						logger.Debugf("[IndexInvokes] Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
 						//logger.Debugf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
@@ -2433,7 +2434,7 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	}
 
 	// Create RAM gravdb store with two trees then diff said trees
-	logger.Printf("[DiffSCIDVariables] Starting tempdb diff...")
+	logger.Debugf("[DiffSCIDVariables] scid: %s - height: %v", scid, height)
 	var tempdb *storage.GravitonStore
 	tempdb, err = storage.NewGravDBRAM("25ms")
 	if err != nil {
@@ -2441,7 +2442,10 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 		return
 	}
 
-	// Handle storing varset1
+	// Handle storing
+	vs1kuint64 := make(map[string]bool)
+	vs1kstring := make(map[string]bool)
+
 	store := tempdb.DB
 	ss, err := store.LoadSnapshot(0) // load most recent snapshot
 	if err != nil {
@@ -2453,48 +2457,57 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	for _, vs1 := range varset1 {
 		switch ckey := vs1.Key.(type) {
 		case uint64:
+
 			uintkey, err := json.Marshal(ckey)
 			if err != nil {
 				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
 				break
 			}
+
 			switch cval := vs1.Value.(type) {
 			case uint64:
+
 				uintval, err := json.Marshal(cval)
 				if err != nil {
 					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
 					break
 				}
+
 				tree.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", ckey)] = true
 			case string:
-				strval, err := json.Marshal(cval)
-				if err != nil {
-					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
-					break
-				}
+				strval := []byte(cval)
+
 				tree.Put(uintkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", ckey)] = true
 			}
 		case string:
-			strkey, err := json.Marshal(ckey)
-			if err != nil {
-				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
-				break
-			}
+			strkey := []byte(ckey)
+
 			switch cval := vs1.Value.(type) {
 			case uint64:
+
 				uintval, err := json.Marshal(cval)
 				if err != nil {
 					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
 					break
 				}
+
 				tree.Put(strkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kstring[ckey] = true
 			case string:
-				strval, err := json.Marshal(cval)
-				if err != nil {
-					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
-					break
-				}
+				strval := []byte(cval)
+
 				tree.Put(strkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs1kstring[ckey] = true
 			}
 		default:
 			// Do nothing
@@ -2503,6 +2516,16 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	// End storing varset1
 
 	// Handle storing varset2
+	vs2kuu := make(map[uint64]uint64)
+	vs2kus := make(map[uint64]string)
+	vs2ksu := make(map[string]uint64)
+	vs2kss := make(map[string]string)
+
+	vs2kuint64 := make(map[string]bool)
+	vs2kstring := make(map[string]bool)
+	vs2vuint64 := make(map[string]bool)
+	vs2vstring := make(map[string]bool)
+
 	treename2 := "varset2"
 	tree2, _ := ss.GetTree(treename2)
 	for _, vs2 := range varset2 {
@@ -2513,43 +2536,66 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
 				break
 			}
+
 			switch cval := vs2.Value.(type) {
 			case uint64:
+
 				uintval, err := json.Marshal(cval)
 				if err != nil {
 					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
 					break
 				}
+
 				tree2.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", ckey)] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+
+				vs2kuu[ckey] = cval
 			case string:
-				strval, err := json.Marshal(cval)
-				if err != nil {
-					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
-					break
-				}
+				strval := []byte(cval)
+
 				tree2.Put(uintkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", ckey)] = true
+				vs2vstring[cval] = true
+
+				vs2kus[ckey] = cval
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
 			}
 		case string:
-			strkey, err := json.Marshal(ckey)
-			if err != nil {
-				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
-				break
-			}
+			strkey := []byte(ckey)
+
 			switch cval := vs2.Value.(type) {
 			case uint64:
+
 				uintval, err := json.Marshal(cval)
 				if err != nil {
 					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
 					break
 				}
+
 				tree2.Put(strkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kstring[ckey] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+				vs2ksu[ckey] = cval
 			case string:
-				strval, err := json.Marshal(cval)
-				if err != nil {
-					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
-					break
-				}
+				strval := []byte(cval)
+
 				tree2.Put(strkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs2kstring[ckey] = true
+				vs2vstring[cval] = true
+
+				vs2kss[ckey] = cval
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
 			}
 		default:
 			// Do nothing
@@ -2588,74 +2634,305 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 
 	err = graviton.Diff(varset1_tree, varset2_tree, delete_handler, modify_handler, insert_handler)
 
-	logger.Printf("[DiffSCIDVariables] delete: %v", delete_map_actual)
-	logger.Printf("[DiffSCIDVariables] modify: %v", modify_map_actual)
-	logger.Printf("[DiffSCIDVariables] insert: %v", insert_map_actual)
-	logger.Printf("[DiffSCIDVariables] Ending tempdb diff...")
+	if len(delete_map_actual) > 0 {
+		logger.Debugf("[DiffSCIDVariables] delete: %v", delete_map_actual)
+	}
+	if len(modify_map_actual) > 0 {
+		logger.Debugf("[DiffSCIDVariables] modify: %v", modify_map_actual)
+	}
+	if len(insert_map_actual) > 0 {
+		logger.Debugf("[DiffSCIDVariables] insert: %v", insert_map_actual)
+	}
 	// End Diff trees
 
-	// Crude looping. Perhaps some optimization to be implemented here. Large variable sets will take longer and longer to loop
-	logger.Printf("[DiffSCIDVariables] Starting crude loops...")
-	var diffsetkeys []interface{}
-	for i := 0; i < 2; i++ {
-		for _, vs1 := range varset1 {
-			kfound := false
-			vfound := false
-			co := &structures.SCIDVariable{}
-			for _, vs2 := range varset2 {
-				if vs1.Key == vs2.Key {
-					kfound = true
-					if vs1.Value == vs2.Value {
-						vfound = true
+	// Because diff data is returned in a map[string]string , we want to check to maintain type for data consistency.
+	// Check against slices to determine to store a string or uint64 interface variable
+	for mak, mav := range modify_map_actual {
+		co := &structures.SCIDVariable{}
+
+		// String data coming out of the compare seems to append "" around strings, so we pop those off
+		mak2 := mak
+		mav2 := mav
+
+		if len(mak2) > 0 && mak2[0] == '"' {
+			mak2 = mak2[1:]
+		}
+		if len(mak2) > 0 && mak2[len(mak2)-1] == '"' {
+			mak2 = mak2[:len(mak2)-1]
+		}
+		if len(mav2) > 0 && mav2[0] == '"' {
+			mav2 = mav2[1:]
+		}
+		if len(mav2) > 0 && mav2[len(mav2)-1] == '"' {
+			mav2 = mav2[:len(mav2)-1]
+		}
+
+		// Loop through populated string slices from above to determine 'actual' key/variable types prior to storing them into db
+		if vs2kstring[mak] || vs2kstring[mak2] {
+			// Key is string
+			if vs2kstring[mak2] {
+				mak = mak2
+			}
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				// Value is uint64
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				co.Key = mak
+				mavuint, _ := strconv.ParseUint(mav, 10, 64)
+				co.Value = mavuint
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a string. Value '%v' is a uint64.", mak, mav)
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				// Value is string
+				if vs2vstring[mav2] {
+					mav = mav2
+				}
+				co.Key = mak
+				co.Value = mav
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a string. Value '%v' is a string.", mak, mav)
+			} else {
+				// No match
+				// We can assume it is a string, however we want to add the pulled value rather than perhaps the UTF-8 return value from the Diff()
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a string, but value '%v' does not match string or uint64. Using varset2 string value '%v' instead.", mak, mav, vs2kss[mak])
+				co.Key = mak
+				co.Value = vs2kss[mak]
+			}
+		} else if vs2kuint64[mak] || vs2kuint64[mak2] {
+			// Key is uint64
+			if vs2kuint64[mak2] {
+				mak = mak2
+			}
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				// Value is uint64
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				co.Key = makuint
+				mavuint, _ := strconv.ParseUint(mav, 10, 64)
+				co.Value = mavuint
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a uint64. Value '%v' is a uint64.", mak, mav)
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				// Value is string
+				if vs2vstring[mav2] {
+					mav = mav2
+				}
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				co.Key = makuint
+				co.Value = mav
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a uint64. Value '%v' is a string.", mak, mav)
+			} else {
+				// No match
+				// We can assume it is a string, however we want to add the pulled value rather than perhaps the UTF-8 return value from the Diff()
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				//logger.Debugf("[DiffSCIDVariables-Modify] Key '%v' is a uint64, but value '%v' does not match string or uint64. Using varset2 string value '%v' instead.", mak, mav, vs2kus[makuint])
+				co.Key = makuint
+				co.Value = vs2kus[makuint]
+			}
+		} else {
+			// No match on key. Check values and report errors accordingly [We should not generally get here if above logic works. Edge cases perhaps.]
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				for k, v := range vs2ksu {
+					mavuint, _ := strconv.ParseUint(mav, 10, 64)
+					if v == mavuint {
+						logger.Errorf("[DiffSCIDVariables-Modify] Key '%v' - does not match string or uint64. Value is a uint64: '%v' . Using key '%v' instead.", mak, mav, k)
+						co.Key = k
+						co.Value = mavuint
 						break
-					} else {
-						co.Key = vs2.Key
-						co.Value = vs2.Value
-					}
-					break
-				}
-			}
-
-			// If key and value not found; log the diff. Loops through both sets twice while flipping the order to check for deletions etc.
-			if !kfound && !vfound {
-				if i == 0 {
-					co.Key = vs1.Key
-					for _, vs2 := range varset2 {
-						if vs1.Key == vs2.Key {
-							co.Value = vs2.Value
-						}
-					}
-				} else {
-					co.Key = vs1.Key
-					for _, vs2 := range varset1 {
-						if vs1.Key == vs2.Key {
-							co.Value = vs1.Value
-						}
 					}
 				}
-
-				if co.Value == nil {
-					logger.Debugf("[DiffSCIDVariables] Key '%s' value was deleted at height '%v'.", co.Key, height)
+				if co.Key == nil || co.Value == nil {
+					logger.Fatalf("[DiffSCIDVariables-Modify] ERR - nil.")
 				}
-				// TODO: Need to have a diffsetkeys that are maybe of type interface and a different exists function specific to string/int64 catching
-				if vExist(diffsetkeys, co.Key) {
-					logger.Errorf("[DiffSCIDVariables] Key diff '%s' already exists in slice for comparison.", co.Key)
-					continue
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				if vs2vstring[mav2] {
+					mav = mav2
 				}
-
-				//logger.Debugf("[DiffSCIDVariables] SCID '%s' scvar diffs -> appending to diffset: %v", scid, co)
-				diffset = append(diffset, co)
-				diffsetkeys = append(diffsetkeys, co.Key)
+				for k, v := range vs2kss {
+					if v == mav {
+						logger.Errorf("[DiffSCIDVariables-Modify] Key '%v' - does not match string or uint64. Value is a string: '%v' . Using key '%v' instead.", mak, mav, k)
+						co.Key = k
+						co.Value = mav
+						break
+					}
+				}
+				if co.Key == nil || co.Value == nil {
+					logger.Fatalf("[DiffSCIDVariables-Modify] ERR - nil.")
+				}
+			} else {
+				logger.Fatalf("[DiffSCIDVariables-Modify] Key '%v' - does not match string or uint64. Value %v - does not match string or uint64", mak, mav)
 			}
 		}
-
-		// Flip references for another iteration
-		if i == 0 {
-			varset1, varset2 = varset2, varset1
-		}
+		diffset = append(diffset, co)
 	}
 
-	logger.Printf("[DiffSCIDVariables] Ending crude loops...")
+	for mak, mav := range insert_map_actual {
+		co := &structures.SCIDVariable{}
+
+		// String data coming out of the compare seems to append "" around strings, so we pop those off
+		mak2 := mak
+		mav2 := mav
+
+		if len(mak2) > 0 && mak2[0] == '"' {
+			mak2 = mak2[1:]
+		}
+		if len(mak2) > 0 && mak2[len(mak2)-1] == '"' {
+			mak2 = mak2[:len(mak2)-1]
+		}
+		if len(mav2) > 0 && mav2[0] == '"' {
+			mav2 = mav2[1:]
+		}
+		if len(mav2) > 0 && mav2[len(mav2)-1] == '"' {
+			mav2 = mav2[:len(mav2)-1]
+		}
+
+		// Loop through populated string slices from above to determine 'actual' key/variable types prior to storing them into db
+		if vs2kstring[mak] || vs2kstring[mak2] {
+			// Key is string
+			if vs2kstring[mak2] {
+				mak = mak2
+			}
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				// Value is uint64
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				co.Key = mak
+				mavuint, _ := strconv.ParseUint(mav, 10, 64)
+				co.Value = mavuint
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a string. Value '%v' is a uint64.", mak, mav)
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				// Value is string
+				if vs2vstring[mav2] {
+					mav = mav2
+				}
+				co.Key = mak
+				co.Value = mav
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a string. Value '%v' is a string.", mak, mav)
+			} else {
+				// No match
+				// We can assume it is a string, however we want to add the pulled value rather than perhaps the UTF-8 return value from the Diff()
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a string, but value '%v' does not match string or uint64. Using varset2 string value '%v' instead.", mak, mav, vs2kss[mak])
+				co.Key = mak
+				co.Value = vs2kss[mak]
+			}
+		} else if vs2kuint64[mak] || vs2kuint64[mak2] {
+			// Key is uint64
+			if vs2kuint64[mak2] {
+				mak = mak2
+			}
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				// Value is uint64
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				co.Key = makuint
+				mavuint, _ := strconv.ParseUint(mav, 10, 64)
+				co.Value = mavuint
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a uint64. Value '%v' is a uint64.", mak, mav)
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				// Value is string
+				if vs2vstring[mav2] {
+					mav = mav2
+				}
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				co.Key = makuint
+				co.Value = mav
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a uint64. Value '%v' is a string.", mak, mav)
+			} else {
+				// No match
+				// We can assume it is a string, however we want to add the pulled value rather than perhaps the UTF-8 return value from the Diff()
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				//logger.Debugf("[DiffSCIDVariables-Insert] Key '%v' is a uint64, but value '%v' does not match string or uint64. Using varset2 string value '%v' instead.", mak, mav, vs2kus[makuint])
+				co.Key = makuint
+				co.Value = vs2kus[makuint]
+			}
+		} else {
+			// No match on key. Check values and report errors accordingly [We should not generally get here if above logic works. Edge cases perhaps.]
+			if vs2vuint64[mav] || vs2vuint64[mav2] {
+				if vs2vuint64[mav2] {
+					mav = mav2
+				}
+				for k, v := range vs2ksu {
+					mavuint, _ := strconv.ParseUint(mav, 10, 64)
+					if v == mavuint {
+						logger.Errorf("[DiffSCIDVariables-Insert] Key '%v' - does not match string or uint64. Value is a uint64: '%v' . Using key '%v' instead.", mak, mav, k)
+						co.Key = k
+						co.Value = mavuint
+						break
+					}
+				}
+				if co.Key == nil || co.Value == nil {
+					logger.Fatalf("[DiffSCIDVariables-Insert] ERR - nil.")
+				}
+			} else if vs2vstring[mav] || vs2vstring[mav2] {
+				if vs2vstring[mav2] {
+					mav = mav2
+				}
+				for k, v := range vs2kss {
+					if v == mav {
+						logger.Errorf("[DiffSCIDVariables-Insert] Key '%v' - does not match string or uint64. Value is a string: '%v' . Using key '%v' instead.", mak, mav, k)
+						co.Key = k
+						co.Value = mav
+						break
+					}
+				}
+				if co.Key == nil || co.Value == nil {
+					logger.Fatalf("[DiffSCIDVariables-Insert] ERR - nil.")
+				}
+			} else {
+				logger.Fatalf("[DiffSCIDVariables-Insert] Key '%v' - does not match string or uint64. Value %v - does not match string or uint64", mak, mav)
+			}
+		}
+		diffset = append(diffset, co)
+	}
+
+	// Checking through the delete set we can assume (given the input to the diff) that any values returned can simply be stored with nil values as they were deleted
+	for mak, _ := range delete_map_actual {
+		co := &structures.SCIDVariable{}
+
+		// String data coming out of the compare seems to append "" around strings, so we pop those off to at least compare
+		// Edge cases like this can come up with sha256 or TXID()-like data exports that we aren't fully decoding for data stores
+		mak2 := mak
+		if len(mak2) > 0 && mak2[0] == '"' {
+			mak2 = mak2[1:]
+		}
+		if len(mak2) > 0 && mak2[len(mak2)-1] == '"' {
+			mak2 = mak2[:len(mak2)-1]
+		}
+
+		// Loop through populated string slices from above to determine 'actual' key types prior to storing them into db
+		if vs1kstring[mak] || vs1kstring[mak2] {
+			// Key is string
+			if vs1kstring[mak] {
+				co.Key = mak
+				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a string.", mak)
+			} else {
+				co.Key = mak2
+				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a string.", mak2)
+			}
+		} else if vs1kuint64[mak] || vs1kuint64[mak2] {
+			// Key is uint64
+			if vs1kuint64[mak] {
+				makuint, _ := strconv.ParseUint(mak, 10, 64)
+				co.Key = makuint
+				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a uint64.", mak)
+			} else {
+				makuint, _ := strconv.ParseUint(mak2, 10, 64)
+				co.Key = makuint
+				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a uint64.", mak2)
+			}
+		} else {
+			// No match on key. Check values and report errors accordingly [We should not get here if above logic works]
+			logger.Fatalf("[DiffSCIDVariables-Delete] Key '%v' - does not match string or uint64.", mak)
+		}
+		// Delete map references have a key and a nil value
+		diffset = append(diffset, co)
+	}
 
 	return
 }

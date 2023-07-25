@@ -60,12 +60,10 @@ Options:
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
   --enable-experimental-scvarstore     Enables storing of the scid variables per interaction as a difference rather than the entire store. Much less storage usage, however unoptimized diff and will take significantly longer currently. This option will be removed in future.
+  --remove-api-throttle     Removes the api throttle against number of sc variables, sc invoke data etc. to return
   --debug     Enables debug logging`
 
 var Exit_In_Progress = make(chan bool)
-
-// TODO: Implement semver or other
-var version = "0.1.2"
 
 var RLI *readline.Instance
 
@@ -86,7 +84,7 @@ func main() {
 	Gnomon.Indexers = make(map[string]*indexer.Indexer)
 
 	// Inspect argument(s)
-	arguments, err := docopt.ParseArgs(command_line, nil, version)
+	arguments, err := docopt.ParseArgs(command_line, nil, structures.Version.String())
 	if err != nil {
 		log.Fatalf("[Main] Error while parsing arguments err: %s", err)
 	}
@@ -222,6 +220,12 @@ func main() {
 		experimentalscvars = true
 	}
 
+	// Enable api throttle (or disable if set)
+	api_throttle := true
+	if arguments["--remove-api-throttle"] != nil && arguments["--remove-api-throttle"].(bool) == true {
+		api_throttle = false
+	}
+
 	// Database
 	var Graviton_backend *storage.GravitonStore
 	var Bbs_backend *storage.BboltStore
@@ -284,6 +288,7 @@ func main() {
 		KeyFile:              "cert.key",
 		GetInfoKeyFile:       "getinfocert.key",
 		MBLLookup:            mbl,
+		ApiThrottle:          api_throttle,
 	}
 	// TODO: Add default search filter index of sorts, rather than passing through Graviton_backend object as a whole
 	apis := api.NewApiServer(apic, Graviton_backend, Bbs_backend, Gnomon.DBType)
@@ -417,7 +422,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case line == "help":
 			usage(l.Stderr())
 		case line == "version":
-			logger.Printf("Version: %v", version)
+			logger.Printf("Version: %v", structures.Version.String())
 		case command == "listsc":
 			for ki, vi := range g.Indexers {
 				logger.Printf("- Indexer '%v'", ki)
