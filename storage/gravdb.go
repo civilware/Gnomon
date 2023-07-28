@@ -937,7 +937,9 @@ func (g *GravitonStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheig
 					case string:
 						vs2k[ckey] = cval
 					default:
-						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						if cval != nil {
+							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						}
 					}
 				case string:
 					switch cval := vs.Value.(type) {
@@ -948,10 +950,14 @@ func (g *GravitonStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheig
 					case string:
 						vs2k[ckey] = cval
 					default:
-						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						if cval != nil {
+							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						}
 					}
 				default:
-					logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
+					if ckey != nil {
+						logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
+					}
 				}
 			}
 		}
@@ -1058,7 +1064,9 @@ func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) (hVars []*structu
 					case string:
 						vs2k[ckey] = cval
 					default:
-						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						if cval != nil {
+							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						}
 					}
 				case string:
 					switch cval := vs.Value.(type) {
@@ -1069,10 +1077,14 @@ func (g *GravitonStore) GetAllSCIDVariableDetails(scid string) (hVars []*structu
 					case string:
 						vs2k[ckey] = cval
 					default:
-						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						if cval != nil {
+							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						}
 					}
 				default:
-					logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
+					if ckey != nil {
+						logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
+					}
 				}
 			}
 		}
