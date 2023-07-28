@@ -151,6 +151,28 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	if storedindex == 0 && indexer.Fastsync {
 		logger.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
 		storedindex = indexer.ChainHeight
+	} else if storedindex == 0 {
+		// If no stored index (first run) and not fastsync, set storedIndex to 1. Utilizing a storedindex of 0 when getting sc vars (esp for builtin) will result in the chain height return data
+		storedindex = int64(1)
+	}
+
+	// We can also assume this check to mean we have stored validated SCs potentially. TODO: Do we just get stored SCs regardless of sync cycle?
+	pre_validatedSCIDs := make(map[string]string)
+	switch indexer.DBType {
+	case "gravdb":
+		pre_validatedSCIDs = indexer.GravDBBackend.GetAllOwnersAndSCIDs()
+	case "boltdb":
+		pre_validatedSCIDs = indexer.BBSBackend.GetAllOwnersAndSCIDs()
+	}
+
+	if len(pre_validatedSCIDs) > 0 {
+		logger.Printf("[StartDaemonMode] Appending pre-validated SCIDs from store to memory.")
+
+		for k := range pre_validatedSCIDs {
+			indexer.Lock()
+			indexer.ValidatedSCs = append(indexer.ValidatedSCs, k)
+			indexer.Unlock()
+		}
 	}
 
 	for _, vi := range hardcodedscids {
@@ -159,7 +181,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			continue
 		}
 
-		scVars, scCode, _, _ := indexer.RPC.GetSCVariables(vi, indexer.ChainHeight, nil, nil, nil)
+		scVars, scCode, _, _ := indexer.RPC.GetSCVariables(vi, storedindex, nil, nil, nil)
 
 		var contains bool
 
@@ -204,20 +226,23 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						ctrees = append(ctrees, sotree)
 					}
 				}
-				svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight, true)
-				if err != nil {
-					logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v", err)
-				} else {
-					if svdchanges {
-						ctrees = append(ctrees, svdtree)
+				// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+				if len(scVars) > 0 {
+					svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(vi, scVars, storedindex, true)
+					if err != nil {
+						logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v", err)
+					} else {
+						if svdchanges {
+							ctrees = append(ctrees, svdtree)
+						}
 					}
-				}
-				sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight, true)
-				if err != nil {
-					logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v", err)
-				} else {
-					if sihchanges {
-						ctrees = append(ctrees, sihtree)
+					sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(vi, storedindex, true)
+					if err != nil {
+						logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v", err)
+					} else {
+						if sihchanges {
+							ctrees = append(ctrees, sihtree)
+						}
 					}
 				}
 				if len(ctrees) > 0 {
@@ -243,13 +268,16 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 				if err != nil {
 					logger.Errorf("[StartDaemonMode-hardcodedscids] Error storing owner: %v", err)
 				}
-				_, err = indexer.BBSBackend.StoreSCIDVariableDetails(vi, scVars, indexer.ChainHeight)
-				if err != nil {
-					logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v", err)
-				}
-				_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(vi, indexer.ChainHeight)
-				if err != nil {
-					logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v", err)
+				// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+				if len(scVars) > 0 {
+					_, err = indexer.BBSBackend.StoreSCIDVariableDetails(vi, scVars, storedindex)
+					if err != nil {
+						logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid variable details: %v", err)
+					}
+					_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(vi, storedindex)
+					if err != nil {
+						logger.Errorf("[StartDaemonMode-hardcodedscids] ERR - storing scid interaction height: %v", err)
+					}
 				}
 				indexer.BBSBackend.Writing = 0
 				indexer.BBSBackend.Writer = ""
@@ -262,25 +290,6 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		indexer.Lock()
 		indexer.LastIndexedHeight = storedindex
 		indexer.Unlock()
-
-		// We can also assume this check to mean we have stored validated SCs potentially. TODO: Do we just get stored SCs regardless of sync cycle?
-		pre_validatedSCIDs := make(map[string]string)
-		switch indexer.DBType {
-		case "gravdb":
-			pre_validatedSCIDs = indexer.GravDBBackend.GetAllOwnersAndSCIDs()
-		case "boltdb":
-			pre_validatedSCIDs = indexer.BBSBackend.GetAllOwnersAndSCIDs()
-		}
-
-		if len(pre_validatedSCIDs) > 0 {
-			logger.Printf("[StartDaemonMode] Appending pre-validated SCIDs from store to memory.")
-
-			for k := range pre_validatedSCIDs {
-				indexer.Lock()
-				indexer.ValidatedSCs = append(indexer.ValidatedSCs, k)
-				indexer.Unlock()
-			}
-		}
 
 		var getinfo *structures.GetInfo
 		switch indexer.DBType {
@@ -1652,6 +1661,24 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 						switch indexer.DBType {
 						case "gravdb":
 							if !(indexer.RunMode == "asset") {
+								// We can pre-get the relevant scvar details outside a write block due to daemon lookup and nothing relevant to db stores
+								var scVarsDiff []*structures.SCIDVariable
+								var scVars []*structures.SCIDVariable
+
+								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
+								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
+									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+									return
+								} else {
+									if indexer.ExperimentalSCVarStore {
+										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+										scVarsDiff = indexer.GravDBBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
+									}
+
+									// Gets the SC variables (key/value) at a given topoheight
+									scVars, _, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+								}
+
 								for indexer.GravDBBackend.Writing == 1 {
 									if indexer.Closing {
 										return
@@ -1662,70 +1689,54 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								indexer.GravDBBackend.Writing = 1
 								var ctrees []*graviton.Tree
 
-								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+								sidtree, sidchanges, err := indexer.GravDBBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx, true)
+								if err != nil {
+									logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
+									time.Sleep(5 * time.Second)
+									indexer.GravDBBackend.Writing = 0
+									return err
 								} else {
-
-									sidtree, sidchanges, err := indexer.GravDBBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx, true)
-									if err != nil {
-										logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
-										time.Sleep(5 * time.Second)
-										indexer.GravDBBackend.Writing = 0
-										return err
-									} else {
-										if sidchanges {
-											ctrees = append(ctrees, sidtree)
-										}
+									if sidchanges {
+										ctrees = append(ctrees, sidtree)
 									}
+								}
 
-									if indexer.ExperimentalSCVarStore {
-										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-										scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
-
-										// Gets the SC variables (key/value) at a given topoheight
-										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
-
-										scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
-										if err != nil {
-											// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-											logger.Errorf("[indexBlock-installsc] ERR - %v", err)
-										} else if len(scVarsStore) > 0 {
-											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-											svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight, true)
-											if err != nil {
-												logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
-											} else {
-												if svdchanges {
-													ctrees = append(ctrees, svdtree)
-												}
-											}
-										}
-									} else {
-										// Gets the SC variables (key/value) at a given topoheight
-										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
-
+								if indexer.ExperimentalSCVarStore {
+									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
+									if err != nil {
+										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
+										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+									} else if len(scVarsStore) > 0 {
 										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-										if len(scVars) > 0 {
-											svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
-											if err != nil {
-												logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
-											} else {
-												if svdchanges {
-													ctrees = append(ctrees, svdtree)
-												}
+										svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight, true)
+										if err != nil {
+											logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+										} else {
+											if svdchanges {
+												ctrees = append(ctrees, svdtree)
 											}
 										}
 									}
-									sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
-									if err != nil {
-										logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
-									} else {
-										if sihchanges {
-											ctrees = append(ctrees, sihtree)
+								} else {
+									// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+									if len(scVars) > 0 {
+										svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
+										if err != nil {
+											logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+										} else {
+											if svdchanges {
+												ctrees = append(ctrees, svdtree)
+											}
 										}
 									}
-
+								}
+								sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
+								if err != nil {
+									logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
+								} else {
+									if sihchanges {
+										ctrees = append(ctrees, sihtree)
+									}
 								}
 
 								if len(ctrees) > 0 {
@@ -1740,6 +1751,25 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							}
 						case "boltdb":
 							if !(indexer.RunMode == "asset") {
+								// We can pre-get the relevant scvar details outside a write block due to daemon lookup and nothing relevant to db stores
+								var scVarsDiff []*structures.SCIDVariable
+								//var scVarsDiff2 []*structures.SCIDVariable
+								var scVars []*structures.SCIDVariable
+
+								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
+								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
+									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+									return
+								} else {
+									if indexer.ExperimentalSCVarStore {
+										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+										scVarsDiff = indexer.BBSBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
+									}
+
+									// Gets the SC variables (key/value) at a given topoheight
+									scVars, _, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+								}
+
 								for indexer.BBSBackend.Writing == 1 {
 									if indexer.Closing {
 										return
@@ -1750,56 +1780,41 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								indexer.BBSBackend.Writing = 1
 								indexer.BBSBackend.Writer = "IndexInvokesDetailsStore"
 
-								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
-								} else {
-
-									_, err := indexer.BBSBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx)
-									if err != nil {
-										logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
-										time.Sleep(5 * time.Second)
-										indexer.BBSBackend.Writing = 0
-										indexer.BBSBackend.Writer = ""
-										return err
-									}
-
-									if indexer.ExperimentalSCVarStore {
-										// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-										scVarsDiff, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight-1, nil, nil, nil)
-
-										// Gets the SC variables (key/value) at a given topoheight
-										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
-
-										scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
-										if err != nil {
-											// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-											logger.Errorf("[indexBlock-installsc] ERR - %v", err)
-										} else if len(scVarsStore) > 0 {
-											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-											_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight)
-											if err != nil {
-												logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
-											}
-										}
-									} else {
-										// Gets the SC variables (key/value) at a given topoheight
-										scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
-
-										if len(scVars) > 0 {
-											// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
-											_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
-											if err != nil {
-												logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
-											}
-										}
-									}
-									_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight)
-									if err != nil {
-										logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
-									}
-
+								_, err := indexer.BBSBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx)
+								if err != nil {
+									logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
+									time.Sleep(5 * time.Second)
+									indexer.BBSBackend.Writing = 0
+									indexer.BBSBackend.Writer = ""
+									return err
 								}
+
+								if indexer.ExperimentalSCVarStore {
+									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
+									if err != nil {
+										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
+										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+									} else if len(scVarsStore) > 0 {
+										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+										_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight)
+										if err != nil {
+											logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+										}
+									}
+								} else {
+									if len(scVars) > 0 {
+										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
+										_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
+										if err != nil {
+											logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+										}
+									}
+								}
+								_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight)
+								if err != nil {
+									logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
+								}
+
 								indexer.BBSBackend.Writing = 0
 								indexer.BBSBackend.Writer = ""
 							}
@@ -2456,8 +2471,47 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	tree, _ := ss.GetTree(treename)
 	for _, vs1 := range varset1 {
 		switch ckey := vs1.Key.(type) {
-		case uint64:
+		case float64:
+			uintkey, err := json.Marshal(uint64(ckey))
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
 
+			switch cval := vs1.Value.(type) {
+			case float64:
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+			case string:
+				strval := []byte(cval)
+
+				tree.Put(uintkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
+			}
+		case uint64:
 			uintkey, err := json.Marshal(ckey)
 			if err != nil {
 				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
@@ -2465,6 +2519,17 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			}
 
 			switch cval := vs1.Value.(type) {
+			case float64:
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kuint64[fmt.Sprintf("%v", ckey)] = true
 			case uint64:
 
 				uintval, err := json.Marshal(cval)
@@ -2484,11 +2549,24 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 
 				// Add to tracking maps
 				vs1kuint64[fmt.Sprintf("%v", ckey)] = true
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
 			}
 		case string:
 			strkey := []byte(ckey)
 
 			switch cval := vs1.Value.(type) {
+			case float64:
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree.Put(strkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs1kstring[ckey] = true
 			case uint64:
 
 				uintval, err := json.Marshal(cval)
@@ -2508,9 +2586,12 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 
 				// Add to tracking maps
 				vs1kstring[ckey] = true
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
 			}
 		default:
 			// Do nothing
+			logger.Errorf("[DiffSCIDVariables] ERR Key doesn't match string or uint64 - %v", ckey)
 		}
 	}
 	// End storing varset1
@@ -2530,6 +2611,55 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	tree2, _ := ss.GetTree(treename2)
 	for _, vs2 := range varset2 {
 		switch ckey := vs2.Key.(type) {
+		case float64:
+			uintkey, err := json.Marshal(ckey)
+			if err != nil {
+				logger.Errorf("[DiffSCIDVariables] ERR Marshalling key - %v", err)
+				break
+			}
+
+			switch cval := vs2.Value.(type) {
+			case float64:
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree2.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+
+				vs2kuu[uint64(ckey)] = uint64(cval)
+			case uint64:
+				uintval, err := json.Marshal(cval)
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree2.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+
+				vs2kuu[uint64(ckey)] = cval
+			case string:
+				strval := []byte(cval)
+
+				tree2.Put(uintkey, strval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", uint64(ckey))] = true
+				vs2vstring[cval] = true
+
+				vs2kus[uint64(ckey)] = cval
+			default:
+				logger.Errorf("[DiffSCIDVariables] ERR Value doesn't match string or uint64 - %v", cval)
+			}
 		case uint64:
 			uintkey, err := json.Marshal(ckey)
 			if err != nil {
@@ -2538,8 +2668,21 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			}
 
 			switch cval := vs2.Value.(type) {
-			case uint64:
+			case float64:
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
 
+				tree2.Put(uintkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kuint64[fmt.Sprintf("%v", ckey)] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+
+				vs2kuu[ckey] = uint64(cval)
+			case uint64:
 				uintval, err := json.Marshal(cval)
 				if err != nil {
 					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
@@ -2570,6 +2713,20 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			strkey := []byte(ckey)
 
 			switch cval := vs2.Value.(type) {
+			case float64:
+
+				uintval, err := json.Marshal(uint64(cval))
+				if err != nil {
+					logger.Errorf("[DiffSCIDVariables] ERR Marshalling value - %v", err)
+					break
+				}
+
+				tree2.Put(strkey, uintval) // insert a value
+
+				// Add to tracking maps
+				vs2kstring[ckey] = true
+				vs2vuint64[fmt.Sprintf("%v", cval)] = true
+				vs2ksu[ckey] = uint64(cval)
 			case uint64:
 
 				uintval, err := json.Marshal(cval)
@@ -2599,6 +2756,7 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			}
 		default:
 			// Do nothing
+			logger.Errorf("[DiffSCIDVariables] ERR Key doesn't match string or uint64 - %v", ckey)
 		}
 	}
 	_, cerr := graviton.Commit(tree, tree2)

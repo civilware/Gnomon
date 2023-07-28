@@ -59,12 +59,15 @@ var shasum string
 shasum = fmt.Sprintf("%x", sha1.Sum([]byte("gnomon")))  // shasum can be used to unique a given db directory if you choose, can use normal words as well - whatever your 
 
 db_name := fmt.Sprintf("%s_%s.db", "GNOMON", shasum)
-current_path, err := os.Getwd()
+wd, err := os.Getwd()
 if err != nil {
-    log.Printf("%v\n", err)
+  logger.Fatalf("[Main] Err getting working directory: %v", err)
 }
-db_path := filepath.Join(current_path, db_name)
+db_path := filepath.Join(wd, "gnomondb")
 Bbs_backend, err = storage.NewBBoltDB(db_path, db_name)
+if err != nil {
+  logger.Fatalf("[Main] Err creating boltdb: %v", err)
+}
 ```
 
 #### GravitonDB

@@ -3,6 +3,8 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,13 +28,17 @@ type BboltStore struct {
 // local logger
 var logger *logrus.Entry
 
-func NewBBoltDB(dbPath string, dbName string) (*BboltStore, error) {
+func NewBBoltDB(dbPath, dbName string) (*BboltStore, error) {
 	var err error
 	var Bbolt_backend *BboltStore = &BboltStore{}
 
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
-	Bbolt_backend.DB, err = bolt.Open(dbName, 0600, &bolt.Options{Timeout: 1 * time.Second})
+	if err := os.MkdirAll(dbPath, 0700); err != nil {
+		return nil, fmt.Errorf("directory creation err %s - dirpath %s", err, dbPath)
+	}
+	db_path := filepath.Join(dbPath, dbName)
+	Bbolt_backend.DB, err = bolt.Open(db_path, 0600, &bolt.Options{Timeout: 1 * time.Second})
 	if err != nil {
 		return Bbolt_backend, fmt.Errorf("[NewBBoltDB] Coult not create bbolt db store: %v", err)
 	}
@@ -543,28 +549,81 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 			return heights[i] < heights[j]
 		})
 
-		for k, v := range heights {
+		vs2k := make(map[interface{}]interface{})
+		for _, v := range heights {
 			if v > topoheight {
-				// Only return all the data relevant to up to the defined height
 				break
 			}
 			for _, vs := range results[v] {
-				kfound := false
-				for _, va := range hVars {
-					if va.Key == vs.Key {
-						// If key already exists in tracked slice, set the 'latest' value to the value
-						kfound = true
-
-						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
-
-						va.Value = vs.Value
-						break
+				switch ckey := vs.Key.(type) {
+				case uint64:
+					switch cval := vs.Value.(type) {
+					case float64:
+						vs2k[ckey] = uint64(cval)
+					case uint64:
+						vs2k[ckey] = cval
+					case string:
+						vs2k[ckey] = cval
+					default:
+						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
 					}
-				}
-				if !kfound {
-					hVars = append(hVars, vs)
+				case string:
+					switch cval := vs.Value.(type) {
+					case float64:
+						vs2k[ckey] = uint64(cval)
+					case uint64:
+						vs2k[ckey] = cval
+					case string:
+						vs2k[ckey] = cval
+					default:
+						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+					}
+				default:
+					logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
 				}
 			}
+		}
+
+		for k, v := range vs2k {
+			// If value is nil, no reason to add.
+			if v == nil || k == nil {
+				logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
+				continue
+			}
+			co := &structures.SCIDVariable{}
+
+			switch ckey := k.(type) {
+			case uint64:
+				switch cval := v.(type) {
+				case float64:
+					co.Key = ckey
+					co.Value = uint64(cval)
+				case uint64:
+					co.Key = ckey
+					co.Value = cval
+				case string:
+					co.Key = ckey
+					co.Value = cval
+				default:
+					logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+				}
+			case string:
+				switch cval := v.(type) {
+				case float64:
+					co.Key = ckey
+					co.Value = uint64(cval)
+				case uint64:
+					co.Key = ckey
+					co.Value = cval
+				case string:
+					co.Key = ckey
+					co.Value = cval
+				default:
+					logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+				}
+			}
+
+			hVars = append(hVars, co)
 		}
 	}
 
@@ -606,24 +665,78 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 			return heights[i] < heights[j]
 		})
 
-		for k, v := range heights {
+		vs2k := make(map[interface{}]interface{})
+		for _, v := range heights {
 			for _, vs := range results[v] {
-				kfound := false
-				for _, va := range hVars {
-					if va.Key == vs.Key {
-						// If key already exists in tracked slice, set the 'latest' value to the value
-						kfound = true
-
-						logger.Debugf("[GetAllSCIDVariableDetails] Key '%v' found, setting value from '%v' to '%v' via height %v", fmt.Sprintf("%v", va.Key), fmt.Sprintf("%v", va.Value), fmt.Sprintf("%v", vs.Value), k)
-
-						va.Value = vs.Value
-						break
+				switch ckey := vs.Key.(type) {
+				case uint64:
+					switch cval := vs.Value.(type) {
+					case float64:
+						vs2k[ckey] = uint64(cval)
+					case uint64:
+						vs2k[ckey] = cval
+					case string:
+						vs2k[ckey] = cval
+					default:
+						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
 					}
-				}
-				if !kfound {
-					hVars = append(hVars, vs)
+				case string:
+					switch cval := vs.Value.(type) {
+					case float64:
+						vs2k[ckey] = uint64(cval)
+					case uint64:
+						vs2k[ckey] = cval
+					case string:
+						vs2k[ckey] = cval
+					default:
+						logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+					}
+				default:
+					logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string or uint64.", ckey)
 				}
 			}
+		}
+
+		for k, v := range vs2k {
+			// If value is nil, no reason to add.
+			if v == nil || k == nil {
+				logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
+				continue
+			}
+			co := &structures.SCIDVariable{}
+
+			switch ckey := k.(type) {
+			case uint64:
+				switch cval := v.(type) {
+				case float64:
+					co.Key = ckey
+					co.Value = uint64(cval)
+				case uint64:
+					co.Key = ckey
+					co.Value = cval
+				case string:
+					co.Key = ckey
+					co.Value = cval
+				default:
+					logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+				}
+			case string:
+				switch cval := v.(type) {
+				case float64:
+					co.Key = ckey
+					co.Value = uint64(cval)
+				case uint64:
+					co.Key = ckey
+					co.Value = cval
+				case string:
+					co.Key = ckey
+					co.Value = cval
+				default:
+					logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+				}
+			}
+
+			hVars = append(hVars, co)
 		}
 	}
 
