@@ -49,6 +49,8 @@ Options:
   --gnomon-api-address=<127.0.0.1:8082>	Gnomon api to connect to.
   --block-deploy-buffer=<10>	Block buffer inbetween SC calls. This is for safety, will be hardcoded to minimum of 2 but can define here any amount (10 default).
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
+  --sf-scid-exclusions=<"a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4;;;c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2">     Defines a scid or scids (use const separator [default ';;;']) to be excluded from indexing regardless of search-filter. If nothing is defined, all scids that match the search-filter will be indexed.
+  --skip-gnomonsc-index     If the gnomonsc is caught within the supplied search filter, you can skip indexing that SC given the size/depth of calls to that SC for increased sync times.
   --debug     Enables debug logging`
 
 // TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
@@ -120,6 +122,26 @@ func main() {
 		logger.Printf("[Main] No search filter defined.. grabbing all.")
 	}
 
+	var sf_scid_exclusions []string
+	if arguments["--sf-scid-exclusions"] != nil {
+		sf_scid_exclusions_nonarr := arguments["--sf-scid-exclusions"].(string)
+		sf_scid_exclusions = strings.Split(sf_scid_exclusions_nonarr, sf_separator)
+		logger.Printf("[Main] Using sf scid base exclusion list: %v", sf_scid_exclusions)
+	}
+
+	if arguments["--skip-gnomonsc-index"] != nil && arguments["--skip-gnomonsc-index"].(bool) == true {
+		// TODO: Crude exclusion of both SCIDs. Proper fix should check daemon version and only exclude the relevant
+		if !scidExist(sf_scid_exclusions, structures.MAINNET_GNOMON_SCID) {
+			logger.Printf("[Main] Appending '%s' to scid exclusion list because --skip-gnomonsc-index was defined", structures.MAINNET_GNOMON_SCID)
+			sf_scid_exclusions = append(sf_scid_exclusions, structures.MAINNET_GNOMON_SCID)
+		}
+
+		if !scidExist(sf_scid_exclusions, structures.TESTNET_GNOMON_SCID) {
+			logger.Printf("[Main] Appending '%s' to scid exclusion list because --skip-gnomonsc-index was defined", structures.TESTNET_GNOMON_SCID)
+			sf_scid_exclusions = append(sf_scid_exclusions, structures.TESTNET_GNOMON_SCID)
+		}
+	}
+
 	logger.Printf("[Main] Using block deploy buffer of '%v' blocks.", thAddition)
 
 	// wallet/derod rpc clients
@@ -144,7 +166,7 @@ func main() {
 
 	for {
 		fetchGnomonIndexes(gnomon_api_endpoint)
-		runGnomonIndexer(daemon_rpc_endpoint, gnomon_api_endpoint, search_filter)
+		runGnomonIndexer(daemon_rpc_endpoint, gnomon_api_endpoint, search_filter, sf_scid_exclusions)
 		logger.Printf("[Main] Round completed. Sleeping 1 minute for next round.")
 		time.Sleep(60 * time.Second)
 	}
@@ -183,7 +205,7 @@ func fetchGnomonIndexes(gnomonendpoint string) {
 	}
 }
 
-func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter []string) {
+func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter []string, sf_scid_exclusions []string) {
 	mux.Lock()
 	defer mux.Unlock()
 	var lastQuery map[string]interface{}
@@ -224,10 +246,10 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 
 	// If we can gather the current height from /api/getinfo then start-topoheight will be passed and fastsync not used. This saves time to not check all SCIDs from gnomon SC. Otherwise default back to "slow and steady" method.
 	if currheight > 0 {
-		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, currheight, derodendpoint, "daemon", false, false, false, false)
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, currheight, derodendpoint, "daemon", false, false, false, false, sf_scid_exclusions)
 		defaultIndexer.StartDaemonMode(1)
 	} else {
-		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, true, false)
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, true, false, sf_scid_exclusions)
 		defaultIndexer.StartDaemonMode(1)
 	}
 
@@ -460,4 +482,15 @@ func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer) {
 	} else {
 		logger.Printf("[sendtx] Tx sent successfully - txid: %v", str.TXID)
 	}
+}
+
+// Check if value exists within a string array/slice
+func scidExist(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
 }

@@ -53,6 +53,7 @@ type Indexer struct {
 	LastIndexedHeight      int64
 	ChainHeight            int64
 	SearchFilter           []string
+	SFSCIDExclusion        []string
 	GravDBBackend          *storage.GravitonStore
 	BBSBackend             *storage.BboltStore
 	DBType                 string
@@ -79,7 +80,7 @@ var Connected bool = false
 // local logger
 var logger *logrus.Entry
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, experimentalscvarstore bool) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, experimentalscvarstore bool, sfscidexclusion []string) *Indexer {
 	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
 
 	logger = structures.Logger.WithFields(logrus.Fields{})
@@ -87,6 +88,7 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.Bb
 	return &Indexer{
 		LastIndexedHeight:      last_indexedheight,
 		SearchFilter:           search_filter,
+		SFSCIDExclusion:        sfscidexclusion,
 		GravDBBackend:          Graviton_backend,
 		BBSBackend:             Bbs_backend,
 		DBType:                 dbtype,
@@ -169,6 +171,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		logger.Printf("[StartDaemonMode] Appending pre-validated SCIDs from store to memory.")
 
 		for k := range pre_validatedSCIDs {
+			if scidExist(indexer.SFSCIDExclusion, k) {
+				logger.Debugf("[StartDaemonMode] Not appending pre-validated SCID '%s' as it resides within SFSCIDExclusion - '%v'.", k, indexer.SFSCIDExclusion)
+				continue
+			}
 			indexer.Lock()
 			indexer.ValidatedSCs = append(indexer.ValidatedSCs, k)
 			indexer.Unlock()
@@ -178,6 +184,11 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	for _, vi := range hardcodedscids {
 		if scidExist(indexer.ValidatedSCs, vi) {
 			// Hardcoded SCID already exists, no need to re-add
+			continue
+		}
+
+		if scidExist(indexer.SFSCIDExclusion, vi) {
+			logger.Debugf("[StartDaemonMode] Not appending hardcoded SCID '%s' as it resides within SFSCIDExclusion - '%v'.", vi, indexer.SFSCIDExclusion)
 			continue
 		}
 
@@ -339,18 +350,30 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 							if v.Value != nil {
 								switch len(ckey) {
 								case 64:
+									if scidExist(indexer.SFSCIDExclusion, ckey) {
+										logger.Debugf("[StartDaemonMode] Not appending gnomonsc data SCID '%s' as it resides within SFSCIDExclusion - '%v'.", ckey, indexer.SFSCIDExclusion)
+										continue
+									}
 									// Check for k/v scid/headers
 									if scidstoadd[ckey] == nil {
 										scidstoadd[ckey] = &structures.FastSyncImport{}
 									}
 									scidstoadd[ckey].Headers = v.Value.(string)
 								case 69:
+									if scidExist(indexer.SFSCIDExclusion, ckey[0:64]) {
+										logger.Debugf("[StartDaemonMode] Not appending gnomonsc data SCID '%s' as it resides within SFSCIDExclusion - '%v'.", ckey[0:64], indexer.SFSCIDExclusion)
+										continue
+									}
 									// Check for k/v scidowner/owner
 									if scidstoadd[ckey[0:64]] == nil {
 										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
 									}
 									scidstoadd[ckey[0:64]].Owner = v.Value.(string)
 								case 70:
+									if scidExist(indexer.SFSCIDExclusion, ckey[0:64]) {
+										logger.Debugf("[StartDaemonMode] Not appending gnomonsc data SCID '%s' as it resides within SFSCIDExclusion - '%v'.", ckey[0:64], indexer.SFSCIDExclusion)
+										continue
+									}
 									// Check for k/v scidheight/height
 									if scidstoadd[ckey[0:64]] == nil {
 										scidstoadd[ckey[0:64]] = &structures.FastSyncImport{}
@@ -744,6 +767,12 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 			// Check if already validated
 			if scidExist(indexer.ValidatedSCs, scid) || indexer.Closing {
 				//logger.Debugf("[AddSCIDToIndex] SCID '%v' already in validated list.", scid)
+				wg.Done()
+
+				return
+			} else if scidExist(indexer.SFSCIDExclusion, scid) {
+				logger.Debugf("[StartDaemonMode] Not appending scidstoadd SCID '%s' as it resides within SFSCIDExclusion - '%v'.", scid, indexer.SFSCIDExclusion)
+
 				wg.Done()
 
 				return
@@ -1432,6 +1461,12 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 		// TODO: Go routine possible for pre-storage components given the number of 'potential' getscvar calls that may be required.. could speed up indexing some more.
 		for i := 0; i < len(bl_sctxs); i++ {
+			// Go ahead and skip any in sfscidexclusion ahead of looking at method. Doesn't matter as we won't store it at all.
+			if scidExist(indexer.SFSCIDExclusion, bl_sctxs[i].Scid) {
+				logger.Debugf("[indexInvokes] Not appending invoke data SCID '%s' as it resides within SFSCIDExclusion - '%v'.", bl_sctxs[i].Scid, indexer.SFSCIDExclusion)
+				continue
+			}
+
 			if bl_sctxs[i].Method == "installsc" {
 				var contains bool
 
@@ -1453,14 +1488,14 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 				if !contains {
 					// Then reject the validation that this is an installsc action and move on
-					logger.Debugf("[indexBlock-installsc] SCID %v does not contain the search filter string, moving on.", bl_sctxs[i].Scid)
+					logger.Debugf("[indexInvokes-installsc] SCID %v does not contain the search filter string, moving on.", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
 					scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
-						logger.Debugf("[indexBlock-installsc] SCID matches search filter. Adding SCID %v / Signer %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
+						logger.Debugf("[indexInvokes-installsc] SCID matches search filter. Adding SCID %v / Signer %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 						indexer.Lock()
 						indexer.ValidatedSCs = append(indexer.ValidatedSCs, bl_sctxs[i].Scid)
 						indexer.Unlock()
@@ -1479,7 +1514,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							var ctrees []*graviton.Tree
 							sotree, sochanges, err := indexer.GravDBBackend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender, true)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] Error storing owner: %v", err)
+								logger.Errorf("[indexInvokes-installsc] Error storing owner: %v", err)
 							} else {
 								if sochanges {
 									ctrees = append(ctrees, sotree)
@@ -1488,7 +1523,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 							sidtree, sidchanges, err := indexer.GravDBBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &bl_sctxs[i], true)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] Err storing invoke details. Err: %v", err)
+								logger.Errorf("[indexInvokes-installsc] Err storing invoke details. Err: %v", err)
 								time.Sleep(5 * time.Second)
 								return err
 							} else {
@@ -1499,7 +1534,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 							svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+								logger.Errorf("[indexInvokes-installsc] ERR - storing scid variable details: %v", err)
 							} else {
 								if svdchanges {
 									ctrees = append(ctrees, svdtree)
@@ -1507,7 +1542,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							}
 							sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] ERR - storing scid interaction height: %v", err)
+								logger.Errorf("[indexInvokes-installsc] ERR - storing scid interaction height: %v", err)
 							} else {
 								if sihchanges {
 									ctrees = append(ctrees, sihtree)
@@ -1516,9 +1551,9 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							if len(ctrees) > 0 {
 								_, err := indexer.GravDBBackend.CommitTrees(ctrees)
 								if err != nil {
-									logger.Errorf("[indexBlock-installsc] ERR - committing trees: %v", err)
+									logger.Errorf("[indexInvokes-installsc] ERR - committing trees: %v", err)
 								} else {
-									//logger.Debugf("[indexBlock-installsc] DEBUG - cv [%v]", cv)
+									//logger.Debugf("[indexInvokes-installsc] DEBUG - cv [%v]", cv)
 								}
 							}
 							indexer.GravDBBackend.Writing = 0
@@ -1535,23 +1570,23 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 							_, err := indexer.BBSBackend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] Error storing owner: %v", err)
+								logger.Errorf("[indexInvokes-installsc] Error storing owner: %v", err)
 							}
 
 							_, err = indexer.BBSBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &bl_sctxs[i])
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] Err storing invoke details. Err: %v", err)
+								logger.Errorf("[indexInvokes-installsc] Err storing invoke details. Err: %v", err)
 								time.Sleep(5 * time.Second)
 								return err
 							}
 
 							_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+								logger.Errorf("[indexInvokes-installsc] ERR - storing scid variable details: %v", err)
 							}
 							_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight)
 							if err != nil {
-								logger.Errorf("[indexBlock-installsc] ERR - storing scid interaction height: %v", err)
+								logger.Errorf("[indexInvokes-installsc] ERR - storing scid interaction height: %v", err)
 							}
 							indexer.BBSBackend.Writing = 0
 							indexer.BBSBackend.Writer = ""
@@ -1560,7 +1595,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 						//logger.Debugf("[IndexInvokes] SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
 						logger.Debugf("[IndexInvokes] Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", bl_sctxs[i].Sender, bl_txns.Topoheight, bl_sctxs[i].Sc_args, bl_sctxs[i].Payloads[0].BurnValue)
 					} else {
-						logger.Debugf("[indexBlock-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
+						logger.Debugf("[indexInvokes-installsc] SCID '%v' appears to be invalid.", bl_sctxs[i].Scid)
 						writeWait, _ := time.ParseDuration("20ms")
 						switch indexer.DBType {
 						case "gravdb":
@@ -1622,7 +1657,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							indexer.GravDBBackend.Writing = 1
 							_, _, err = indexer.GravDBBackend.StoreOwner(bl_sctxs[i].Scid, "", false)
 							if err != nil {
-								logger.Errorf("[indexBlock] Error storing owner: %v", err)
+								logger.Errorf("[indexInvokes] Error storing owner: %v", err)
 							}
 							indexer.GravDBBackend.Writing = 0
 						case "boltdb":
@@ -1638,7 +1673,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 							_, err = indexer.BBSBackend.StoreOwner(bl_sctxs[i].Scid, "")
 							if err != nil {
-								logger.Errorf("[indexBlock] Error storing owner: %v", err)
+								logger.Errorf("[indexInvokes] Error storing owner: %v", err)
 							}
 
 							indexer.BBSBackend.Writing = 0
@@ -1667,7 +1702,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
 								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 									return
 								} else {
 									if indexer.ExperimentalSCVarStore {
@@ -1691,7 +1726,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 								sidtree, sidchanges, err := indexer.GravDBBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx, true)
 								if err != nil {
-									logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
+									logger.Errorf("[indexInvokes] Err storing invoke details. Err: %v", err)
 									time.Sleep(5 * time.Second)
 									indexer.GravDBBackend.Writing = 0
 									return err
@@ -1705,12 +1740,12 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 									if err != nil {
 										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+										logger.Errorf("[indexInvokes-installsc] ERR - %v", err)
 									} else if len(scVarsStore) > 0 {
 										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
 										svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight, true)
 										if err != nil {
-											logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+											logger.Errorf("[indexInvokes-installsc] ERR - storing scid variable details: %v", err)
 										} else {
 											if svdchanges {
 												ctrees = append(ctrees, svdtree)
@@ -1722,7 +1757,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									if len(scVars) > 0 {
 										svdtree, svdchanges, err := indexer.GravDBBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight, true)
 										if err != nil {
-											logger.Errorf("[indexBlock-installsc] ERR - storing scid variable details: %v", err)
+											logger.Errorf("[indexInvokes-installsc] ERR - storing scid variable details: %v", err)
 										} else {
 											if svdchanges {
 												ctrees = append(ctrees, svdtree)
@@ -1732,7 +1767,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								}
 								sihtree, sihchanges, err := indexer.GravDBBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight, true)
 								if err != nil {
-									logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
+									logger.Errorf("[indexInvokes] ERR - storing scid interaction height: %v", err)
 								} else {
 									if sihchanges {
 										ctrees = append(ctrees, sihtree)
@@ -1742,9 +1777,9 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								if len(ctrees) > 0 {
 									_, err := indexer.GravDBBackend.CommitTrees(ctrees)
 									if err != nil {
-										logger.Errorf("[indexBlock] ERR - committing trees: %v", err)
+										logger.Errorf("[indexInvokes] ERR - committing trees: %v", err)
 									} else {
-										//logger.Debugf("[indexBlock] DEBUG - cv [%v]", cv)
+										//logger.Debugf("[indexInvokes] DEBUG - cv [%v]", cv)
 									}
 								}
 								indexer.GravDBBackend.Writing = 0
@@ -1758,7 +1793,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
 								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexBlock] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 									return
 								} else {
 									if indexer.ExperimentalSCVarStore {
@@ -1782,7 +1817,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 
 								_, err := indexer.BBSBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx)
 								if err != nil {
-									logger.Errorf("[indexBlock] Err storing invoke details. Err: %v", err)
+									logger.Errorf("[indexInvokes] Err storing invoke details. Err: %v", err)
 									time.Sleep(5 * time.Second)
 									indexer.BBSBackend.Writing = 0
 									indexer.BBSBackend.Writer = ""
@@ -1793,12 +1828,12 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 									if err != nil {
 										// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
-										logger.Errorf("[indexBlock-installsc] ERR - %v", err)
+										logger.Errorf("[indexInvokes-installsc] ERR - %v", err)
 									} else if len(scVarsStore) > 0 {
 										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
 										_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVarsStore, bl_txns.Topoheight)
 										if err != nil {
-											logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+											logger.Errorf("[indexInvokes] ERR - storing scid variable details: %v", err)
 										}
 									}
 								} else {
@@ -1806,13 +1841,13 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 										// If scVarsStore length is greater than 0, we can assume there were diffs. Otherwise the varstores are equal and move on.
 										_, err = indexer.BBSBackend.StoreSCIDVariableDetails(bl_sctxs[i].Scid, scVars, bl_txns.Topoheight)
 										if err != nil {
-											logger.Errorf("[indexBlock] ERR - storing scid variable details: %v", err)
+											logger.Errorf("[indexInvokes] ERR - storing scid variable details: %v", err)
 										}
 									}
 								}
 								_, err = indexer.BBSBackend.StoreSCIDInteractionHeight(bl_sctxs[i].Scid, bl_txns.Topoheight)
 								if err != nil {
-									logger.Errorf("[indexBlock] ERR - storing scid interaction height: %v", err)
+									logger.Errorf("[indexInvokes] ERR - storing scid interaction height: %v", err)
 								}
 
 								indexer.BBSBackend.Writing = 0
@@ -3068,9 +3103,11 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			// Key is string
 			if vs1kstring[mak] {
 				co.Key = mak
+				co.Value = nil
 				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a string.", mak)
 			} else {
 				co.Key = mak2
+				co.Value = nil
 				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a string.", mak2)
 			}
 		} else if vs1kuint64[mak] || vs1kuint64[mak2] {
@@ -3078,10 +3115,12 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 			if vs1kuint64[mak] {
 				makuint, _ := strconv.ParseUint(mak, 10, 64)
 				co.Key = makuint
+				co.Value = nil
 				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a uint64.", mak)
 			} else {
 				makuint, _ := strconv.ParseUint(mak2, 10, 64)
 				co.Key = makuint
+				co.Value = nil
 				//logger.Debugf("[DiffSCIDVariables-Delete] Key '%v' is a uint64.", mak2)
 			}
 		} else {
