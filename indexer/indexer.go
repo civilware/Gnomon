@@ -3085,7 +3085,7 @@ func (indexer *Indexer) DiffSCIDVariables(varset1 []*structures.SCIDVariable, va
 	}
 
 	// Checking through the delete set we can assume (given the input to the diff) that any values returned can simply be stored with nil values as they were deleted
-	for mak, _ := range delete_map_actual {
+	for mak := range delete_map_actual {
 		co := &structures.SCIDVariable{}
 
 		// String data coming out of the compare seems to append "" around strings, so we pop those off to at least compare

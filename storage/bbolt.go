@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -566,7 +567,9 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 						vs2k[uint64(ckey)] = cval
 					default:
 						if cval != nil {
-							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+							logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[uint64(ckey)] = cval
 						}
 					}
 				case uint64:
@@ -579,7 +582,9 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 						vs2k[ckey] = cval
 					default:
 						if cval != nil {
-							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+							logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[ckey] = cval
 						}
 					}
 				case string:
@@ -592,12 +597,14 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 						vs2k[ckey] = cval
 					default:
 						if cval != nil {
-							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+							logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[ckey] = cval
 						}
 					}
 				default:
 					if ckey != nil {
-						logger.Errorf("[GetAllSCIDVariableDetails] Key '%v' does not match string, uint64 or float64.", ckey)
+						logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Key '%v' does not match string, uint64 or float64.", ckey)
 					}
 				}
 			}
@@ -605,8 +612,8 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 
 		for k, v := range vs2k {
 			// If value is nil, no reason to add.
-			if v == nil || k == nil {
-				logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
+			if v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil()) || k == nil || (reflect.ValueOf(k).Kind() == reflect.Ptr && reflect.ValueOf(k).IsNil()) {
+				//logger.Debugf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
 				continue
 			}
 			co := &structures.SCIDVariable{}
@@ -624,7 +631,8 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 					co.Key = uint64(ckey)
 					co.Value = cval
 				default:
-					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", uint64(ckey)))
+					logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", uint64(ckey)))
+					continue
 				}
 			case uint64:
 				switch cval := v.(type) {
@@ -638,7 +646,8 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 					co.Key = ckey
 					co.Value = cval
 				default:
-					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					continue
 				}
 			case string:
 				switch cval := v.(type) {
@@ -652,7 +661,8 @@ func (bbs *BboltStore) GetSCIDVariableDetailsAtTopoheight(scid string, topoheigh
 					co.Key = ckey
 					co.Value = cval
 				default:
-					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					logger.Errorf("[GetSCIDVariableDetailsAtTopoheight] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					continue
 				}
 			}
 
@@ -713,6 +723,8 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					default:
 						if cval != nil {
 							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[uint64(ckey)] = cval
 						}
 					}
 				case uint64:
@@ -726,6 +738,8 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					default:
 						if cval != nil {
 							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[ckey] = cval
 						}
 					}
 				case string:
@@ -739,6 +753,8 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					default:
 						if cval != nil {
 							logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' does not match string, uint64 or float64.", cval)
+						} else {
+							vs2k[ckey] = cval
 						}
 					}
 				default:
@@ -751,8 +767,8 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 
 		for k, v := range vs2k {
 			// If value is nil, no reason to add.
-			if v == nil || k == nil {
-				logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
+			if v == nil || (reflect.ValueOf(v).Kind() == reflect.Ptr && reflect.ValueOf(v).IsNil()) || k == nil || (reflect.ValueOf(k).Kind() == reflect.Ptr && reflect.ValueOf(k).IsNil()) {
+				//logger.Debugf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is nil. Continuing.", fmt.Sprintf("%v", v), fmt.Sprintf("%v", k))
 				continue
 			}
 			co := &structures.SCIDVariable{}
@@ -771,6 +787,7 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					co.Value = cval
 				default:
 					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' is does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", uint64(ckey)))
+					continue
 				}
 			case uint64:
 				switch cval := v.(type) {
@@ -785,6 +802,7 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					co.Value = cval
 				default:
 					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					continue
 				}
 			case string:
 				switch cval := v.(type) {
@@ -799,6 +817,7 @@ func (bbs *BboltStore) GetAllSCIDVariableDetails(scid string) (hVars []*structur
 					co.Value = cval
 				default:
 					logger.Errorf("[GetAllSCIDVariableDetails] Value '%v' or Key '%v' does not match string, uint64 or float64.", fmt.Sprintf("%v", cval), fmt.Sprintf("%v", ckey))
+					continue
 				}
 			}
 
