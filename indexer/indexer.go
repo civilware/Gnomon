@@ -142,6 +142,9 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	switch indexer.DBType {
 	case "gravdb":
 		storedindex = indexer.GravDBBackend.GetLastIndexHeight()
+		if err != nil {
+			logger.Fatalf("[gravdb-StartDaemonMode] Could not get last index height - %v", err)
+		}
 	case "boltdb":
 		storedindex, err = indexer.BBSBackend.GetLastIndexHeight()
 		if err != nil {
@@ -274,7 +277,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 					time.Sleep(writeWait)
 				}
 				indexer.BBSBackend.Writing = 1
-				indexer.BBSBackend.Writer = "StartDaemonMode"
+				//indexer.BBSBackend.Writer = "StartDaemonMode"
 				_, err := indexer.BBSBackend.StoreOwner(vi, "")
 				if err != nil {
 					logger.Errorf("[StartDaemonMode-hardcodedscids] Error storing owner: %v", err)
@@ -291,7 +294,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 					}
 				}
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 			}
 		}
 	}
@@ -456,10 +459,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 										time.Sleep(writeWait)
 									}
 									indexer.BBSBackend.Writing = 1
-									indexer.BBSBackend.Writer = "StartDaemonMode"
+									//indexer.BBSBackend.Writer = "StartDaemonMode"
 									indexer.BBSBackend.StoreLastIndexHeight(currIndex)
 									indexer.BBSBackend.Writing = 0
-									indexer.BBSBackend.Writer = ""
+									//indexer.BBSBackend.Writer = ""
 								}
 								// Break out on closing call
 								break
@@ -505,10 +508,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 												time.Sleep(writeWait)
 											}
 											indexer.BBSBackend.Writing = 1
-											indexer.BBSBackend.Writer = "StartDaemonMode"
+											//indexer.BBSBackend.Writer = "StartDaemonMode"
 											indexer.BBSBackend.StoreLastIndexHeight(rewindIndex)
 											indexer.BBSBackend.Writing = 0
-											indexer.BBSBackend.Writer = ""
+											//indexer.BBSBackend.Writer = ""
 										}
 
 										// Break out on closing call
@@ -672,10 +675,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						time.Sleep(writeWait)
 					}
 					indexer.BBSBackend.Writing = 1
-					indexer.BBSBackend.Writer = "StartDaemonMode"
+					//indexer.BBSBackend.Writer = "StartDaemonMode"
 					indexer.BBSBackend.StoreLastIndexHeight(indexer.LastIndexedHeight)
 					indexer.BBSBackend.Writing = 0
-					indexer.BBSBackend.Writer = ""
+					//indexer.BBSBackend.Writer = ""
 				}
 			}
 		}
@@ -1048,16 +1051,16 @@ func (indexer *Indexer) indexBlock(blid string, topoheight int64) (blockTxns *st
 				}
 
 				indexer.BBSBackend.Writing = 1
-				indexer.BBSBackend.Writer = "IndexBlock"
+				//indexer.BBSBackend.Writer = "IndexBlock"
 				_, err2 = indexer.BBSBackend.StoreMiniblockDetailsByHash(blid, mbldetails)
 				if err2 != nil {
 					logger.Errorf("[indexBlock] Error storing miniblock details for blid %v", err2)
 					indexer.BBSBackend.Writing = 0
-					indexer.BBSBackend.Writer = ""
+					//indexer.BBSBackend.Writer = ""
 					return blockTxns, err2
 				}
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 			}
 		}
 	}
@@ -1215,10 +1218,10 @@ func (indexer *Indexer) IndexTxn(blTxns *structures.BlockTxns, noStore bool) (bl
 											time.Sleep(writeWait)
 										}
 										indexer.BBSBackend.Writing = 1
-										indexer.BBSBackend.Writer = "IndexTxn"
+										//indexer.BBSBackend.Writer = "IndexTxn"
 										indexer.BBSBackend.StoreNormalTxWithSCIDByAddr(v, &structures.NormalTXWithSCIDParse{Txid: blTxns.Tx_hashes[i].String(), Scid: tx.Payloads[j].SCID.String(), Fees: sc_fees, Height: int64(blTxns.Topoheight)})
 										indexer.BBSBackend.Writing = 0
-										indexer.BBSBackend.Writer = ""
+										//indexer.BBSBackend.Writer = ""
 									}
 								}
 							}
@@ -1407,7 +1410,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			time.Sleep(writeWait)
 		}
 		indexer.BBSBackend.Writing = 1
-		indexer.BBSBackend.Writer = "IndexTxCounts"
+		//indexer.BBSBackend.Writer = "IndexTxCounts"
 		if regTxCount > 0 && !indexer.Fastsync {
 			// Load from mem existing regTxCount and append new value
 			currRegTxCount := indexer.BBSBackend.GetTxCount("registration")
@@ -1415,7 +1418,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			if err != nil {
 				logger.Errorf("[indexBlock] ERROR - Error storing registration tx count. DB '%v' - this block count '%v' - total '%v'", currRegTxCount, regTxCount, regTxCount+currRegTxCount)
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 				return err
 			}
 		}
@@ -1427,7 +1430,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			if err != nil {
 				logger.Errorf("[indexBlock] ERROR - Error storing burn tx count. DB '%v' - this block count '%v' - total '%v'", currBurnTxCount, burnTxCount, regTxCount+currBurnTxCount)
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 				return err
 			}
 		}
@@ -1439,12 +1442,12 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			if err != nil {
 				logger.Errorf("[indexBlock] ERROR - Error storing normal tx count. DB '%v' - this block count '%v' - total '%v'", currNormTxCount, currNormTxCount, normTxCount+currNormTxCount)
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 				return err
 			}
 		}
 		indexer.BBSBackend.Writing = 0
-		indexer.BBSBackend.Writer = ""
+		//indexer.BBSBackend.Writer = ""
 	}
 
 	return nil
@@ -1566,7 +1569,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								time.Sleep(writeWait)
 							}
 							indexer.BBSBackend.Writing = 1
-							indexer.BBSBackend.Writer = "IndexInvokes"
+							//indexer.BBSBackend.Writer = "IndexInvokes"
 
 							_, err := indexer.BBSBackend.StoreOwner(bl_sctxs[i].Scid, bl_sctxs[i].Sender)
 							if err != nil {
@@ -1589,7 +1592,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								logger.Errorf("[indexInvokes-installsc] ERR - storing scid interaction height: %v", err)
 							}
 							indexer.BBSBackend.Writing = 0
-							indexer.BBSBackend.Writer = ""
+							//indexer.BBSBackend.Writer = ""
 						}
 
 						//logger.Debugf("[IndexInvokes] SCID: %v ; Sender: %v ; Entrypoint: %v ; topoheight : %v ; info: %v", bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, topoheight, &bl_sctxs[i])
@@ -1621,10 +1624,10 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									time.Sleep(writeWait)
 								}
 								indexer.BBSBackend.Writing = 1
-								indexer.BBSBackend.Writer = "IndexInvokes"
+								//indexer.BBSBackend.Writer = "IndexInvokes"
 								indexer.BBSBackend.StoreInvalidSCIDDeploys(bl_sctxs[i].Scid, bl_sctxs[i].Fees)
 								indexer.BBSBackend.Writing = 0
-								indexer.BBSBackend.Writer = ""
+								//indexer.BBSBackend.Writer = ""
 							}
 						}
 					}
@@ -1669,7 +1672,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								time.Sleep(writeWait)
 							}
 							indexer.BBSBackend.Writing = 1
-							indexer.BBSBackend.Writer = "IndexInvokesOwnerStore"
+							//indexer.BBSBackend.Writer = "IndexInvokesOwnerStore"
 
 							_, err = indexer.BBSBackend.StoreOwner(bl_sctxs[i].Scid, "")
 							if err != nil {
@@ -1677,7 +1680,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 							}
 
 							indexer.BBSBackend.Writing = 0
-							indexer.BBSBackend.Writer = ""
+							//indexer.BBSBackend.Writer = ""
 						}
 					}
 				}
@@ -1813,14 +1816,14 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									time.Sleep(writeWait)
 								}
 								indexer.BBSBackend.Writing = 1
-								indexer.BBSBackend.Writer = "IndexInvokesDetailsStore"
+								//indexer.BBSBackend.Writer = "IndexInvokesDetailsStore"
 
 								_, err := indexer.BBSBackend.StoreInvokeDetails(bl_sctxs[i].Scid, bl_sctxs[i].Sender, bl_sctxs[i].Entrypoint, bl_txns.Topoheight, &currsctx)
 								if err != nil {
 									logger.Errorf("[indexInvokes] Err storing invoke details. Err: %v", err)
 									time.Sleep(5 * time.Second)
 									indexer.BBSBackend.Writing = 0
-									indexer.BBSBackend.Writer = ""
+									//indexer.BBSBackend.Writer = ""
 									return err
 								}
 
@@ -1851,7 +1854,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								}
 
 								indexer.BBSBackend.Writing = 0
-								indexer.BBSBackend.Writer = ""
+								//indexer.BBSBackend.Writer = ""
 							}
 						}
 
@@ -2027,13 +2030,13 @@ func (indexer *Indexer) getInfo() {
 							time.Sleep(writeWait)
 						}
 						indexer.BBSBackend.Writing = 1
-						indexer.BBSBackend.Writer = "getInfo"
+						//indexer.BBSBackend.Writer = "getInfo"
 						_, err := indexer.BBSBackend.StoreGetInfoDetails(structureGetInfo)
 						if err != nil {
 							logger.Errorf("[getInfo] ERROR - GetInfo store failed: %v", err)
 						}
 						indexer.BBSBackend.Writing = 0
-						indexer.BBSBackend.Writer = ""
+						//indexer.BBSBackend.Writer = ""
 					}
 				}
 			} else {
@@ -2080,13 +2083,13 @@ func (indexer *Indexer) getInfo() {
 					time.Sleep(writeWait)
 				}
 				indexer.BBSBackend.Writing = 1
-				indexer.BBSBackend.Writer = "getInfo"
+				//indexer.BBSBackend.Writer = "getInfo"
 				_, err := indexer.BBSBackend.StoreGetInfoDetails(structureGetInfo)
 				if err != nil {
 					logger.Errorf("[getInfo] ERROR - GetInfo store failed: %v", err)
 				}
 				indexer.BBSBackend.Writing = 0
-				indexer.BBSBackend.Writer = ""
+				//indexer.BBSBackend.Writer = ""
 			}
 		}
 		indexer.Lock()
@@ -3232,11 +3235,11 @@ func (ind *Indexer) Close() {
 			time.Sleep(writeWait)
 		}
 		ind.BBSBackend.Writing = 1
-		ind.BBSBackend.Writer = "Close"
+		//ind.BBSBackend.Writer = "Close"
 		ind.BBSBackend.DB.Sync()
 		ind.BBSBackend.DB.Close()
 		ind.BBSBackend.Writing = 0
-		ind.BBSBackend.Writer = ""
+		//ind.BBSBackend.Writer = ""
 	}
 }
 

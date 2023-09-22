@@ -21,7 +21,7 @@ type BboltStore struct {
 	DB      *bolt.DB
 	DBPath  string
 	Writing int
-	Writer  string
+	//Writer  string
 	Closing bool
 	Buckets []string
 }
