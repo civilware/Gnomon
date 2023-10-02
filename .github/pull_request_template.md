@@ -12,9 +12,9 @@ Fixes # (issue)
 
 Please select the right one.
 
-- [ ] Bug fix (non-breaking change which fixes an issue)
-- [ ] New feature (non-breaking change which adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to not work as expected or existing DBs to be re-synced)
+- [ ] (Patch) Bug fix (non-breaking change which fixes an issue)
+- [ ] (Minor) New feature (non-breaking change which adds functionality)
+- [ ] (Major) Breaking change (fix or feature that would cause existing functionality to not work as expected or existing DBs to be re-synced)
 - [ ] This change requires a documentation update
 
 ## Which part is impacted ?
@@ -31,6 +31,7 @@ Please select the right one.
 - [ ] I have commented my code
 - [ ] My changes generate no new warnings
 - [ ] I have performed a full chain re-scan (if applicable)
+- [ ] I have updated the semver version (structures.Version)
 
 ## License
 

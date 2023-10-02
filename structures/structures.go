@@ -3,6 +3,7 @@ package structures
 import (
 	"encoding/json"
 
+	"github.com/blang/semver/v4"
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
@@ -15,6 +16,10 @@ var Logger logrus.Logger
 // After daemon connection will check if mainnet/testnet and adjust accordingly
 const MAINNET_GNOMON_SCID = "a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4"
 const TESTNET_GNOMON_SCID = "c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2"
+const MAX_API_VAR_RETURN = 1024
+
+// Major.Minor.Patch-Iteration
+var Version = semver.MustParse("1.1.1-alpha.27")
 
 type SCTXParse struct {
 	Txid       string
@@ -62,6 +67,7 @@ type APIConfig struct {
 	KeyFile              string `json:"keyFile"`
 	GetInfoKeyFile       string `json:"getInfoKeyFile"`
 	MBLLookup            bool   `json:"mbblookup"`
+	ApiThrottle          bool   `json:"apithrottle"`
 }
 
 type SCIDVariable struct {

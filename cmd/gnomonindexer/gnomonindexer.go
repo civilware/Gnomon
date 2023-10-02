@@ -59,13 +59,12 @@ Options:
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
-  --enable-experimental-scvarstore     Enables storing of the scid variables per interaction as a difference rather than the entire store. Much less storage usage, however unoptimized diff and will take significantly longer currently. This option will be removed in future.
+  --remove-api-throttle     Removes the api throttle against number of sc variables, sc invoke data etc. to return
+  --sf-scid-exclusions=<"a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4;;;c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2">     Defines a scid or scids (use const separator [default ';;;']) to be excluded from indexing regardless of search-filter. If nothing is defined, all scids that match the search-filter will be indexed.
+  --skip-gnomonsc-index     If the gnomonsc is caught within the supplied search filter, you can skip indexing that SC given the size/depth of calls to that SC for increased sync times.
   --debug     Enables debug logging`
 
 var Exit_In_Progress = make(chan bool)
-
-// TODO: Implement semver or other
-var version = "0.1.2"
 
 var RLI *readline.Instance
 
@@ -86,7 +85,7 @@ func main() {
 	Gnomon.Indexers = make(map[string]*indexer.Indexer)
 
 	// Inspect argument(s)
-	arguments, err := docopt.ParseArgs(command_line, nil, version)
+	arguments, err := docopt.ParseArgs(command_line, nil, structures.Version.String())
 	if err != nil {
 		log.Fatalf("[Main] Error while parsing arguments err: %s", err)
 	}
@@ -168,6 +167,26 @@ func main() {
 		logger.Printf("[Main] No search filter defined.. grabbing all.")
 	}
 
+	var sf_scid_exclusions []string
+	if arguments["--sf-scid-exclusions"] != nil {
+		sf_scid_exclusions_nonarr := arguments["--sf-scid-exclusions"].(string)
+		sf_scid_exclusions = strings.Split(sf_scid_exclusions_nonarr, sf_separator)
+		logger.Printf("[Main] Using sf scid base exclusion list: %v", sf_scid_exclusions)
+	}
+
+	if arguments["--skip-gnomonsc-index"] != nil && arguments["--skip-gnomonsc-index"].(bool) == true {
+		// TODO: Crude exclusion of both SCIDs. Proper fix should check daemon version and only exclude the relevant
+		if !scidExist(sf_scid_exclusions, structures.MAINNET_GNOMON_SCID) {
+			logger.Printf("[Main] Appending '%s' to scid exclusion list because --skip-gnomonsc-index was defined", structures.MAINNET_GNOMON_SCID)
+			sf_scid_exclusions = append(sf_scid_exclusions, structures.MAINNET_GNOMON_SCID)
+		}
+
+		if !scidExist(sf_scid_exclusions, structures.TESTNET_GNOMON_SCID) {
+			logger.Printf("[Main] Appending '%s' to scid exclusion list because --skip-gnomonsc-index was defined", structures.TESTNET_GNOMON_SCID)
+			sf_scid_exclusions = append(sf_scid_exclusions, structures.TESTNET_GNOMON_SCID)
+		}
+	}
+
 	var mbl bool
 	if arguments["--enable-miniblock-lookup"] != nil && arguments["--enable-miniblock-lookup"].(bool) == true {
 		mbl = true
@@ -216,10 +235,10 @@ func main() {
 		ramstore = true
 	}
 
-	// Enable experimental (to be removed later) sc variable diff storage. Saves space, computation takes time until it is optimized for general use and this option goes away
-	var experimentalscvars bool
-	if arguments["--enable-experimental-scvarstore"] != nil && arguments["--enable-experimental-scvarstore"].(bool) == true {
-		experimentalscvars = true
+	// Enable api throttle (or disable if set)
+	api_throttle := true
+	if arguments["--remove-api-throttle"] != nil && arguments["--remove-api-throttle"].(bool) == true {
+		api_throttle = false
 	}
 
 	// Database
@@ -263,12 +282,15 @@ func main() {
 			shasum = fmt.Sprintf("%x", sha1.Sum([]byte(csearch_filter)))
 		}
 		db_name := fmt.Sprintf("%s_%s.db", "GNOMON", shasum)
-		current_path, err := os.Getwd()
+		wd, err := os.Getwd()
 		if err != nil {
 			logger.Fatalf("[Main] Err getting working directory: %v", err)
 		}
-		db_path := filepath.Join(current_path, db_name)
+		db_path := filepath.Join(wd, "gnomondb")
 		Bbs_backend, err = storage.NewBBoltDB(db_path, db_name)
+		if err != nil {
+			logger.Fatalf("[Main] Err creating boltdb: %v", err)
+		}
 	}
 
 	// API
@@ -284,13 +306,14 @@ func main() {
 		KeyFile:              "cert.key",
 		GetInfoKeyFile:       "getinfocert.key",
 		MBLLookup:            mbl,
+		ApiThrottle:          api_throttle,
 	}
 	// TODO: Add default search filter index of sorts, rather than passing through Graviton_backend object as a whole
 	apis := api.NewApiServer(apic, Graviton_backend, Bbs_backend, Gnomon.DBType)
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, experimentalscvars)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, sf_scid_exclusions)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -417,7 +440,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case line == "help":
 			usage(l.Stderr())
 		case line == "version":
-			logger.Printf("Version: %v", version)
+			logger.Printf("Version: %v", structures.Version.String())
 		case command == "listsc":
 			for ki, vi := range g.Indexers {
 				logger.Printf("- Indexer '%v'", ki)
@@ -1227,6 +1250,17 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
 	io.WriteString(w, "\t\033[1mexit\033[0m\t\tQuit the daemon\n")
 	io.WriteString(w, "\t\033[1mquit\033[0m\t\tQuit the daemon\n")
+}
+
+// Check if value exists within a string array/slice
+func scidExist(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (g *GnomonServer) Close() {

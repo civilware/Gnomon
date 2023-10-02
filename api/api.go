@@ -314,6 +314,18 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 			}
 		}
 
+		// Case to ignore large variable returns
+		if len(addrscidinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["addrscidinvokescount"] = 0
+			reply["addrscidinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
 		reply["addrscidinvokescount"] = len(addrscidinvokes)
 		reply["addrscidinvokes"] = addrscidinvokes
 	} else if address != "" && scid == "" {
@@ -334,6 +346,19 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 			}
 		}
 
+		// Case to ignore large variable returns
+		if len(addrinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["addrinvokescount"] = 0
+			reply["addrinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
+
 		reply["addrinvokescount"] = len(addrinvokes)
 		reply["addrinvokes"] = addrinvokes
 	} else if address == "" && scid != "" {
@@ -345,6 +370,20 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		case "boltdb":
 			scidinvokes = apiServer.BBSBackend.GetAllSCIDInvokeDetails(scid)
 		}
+
+		// Case to ignore large variable returns
+		if len(scidinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["scidinvokescount"] = 0
+			reply["scidinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
+
 		reply["scidinvokescount"] = len(scidinvokes)
 		reply["scidinvokes"] = scidinvokes
 	}
@@ -426,6 +465,18 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
 			variables = apiServer.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
 		case "boltdb":
 			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
 
@@ -433,6 +484,18 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
 			variables = apiServer.BBSBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
 		}
 
 		reply["variables"] = variables
@@ -444,9 +507,9 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		var scidInteractionHeights []int64
 
 		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
-		if scid == "0000000000000000000000000000000000000000000000000000000000000001" || scid == structures.MAINNET_GNOMON_SCID || scid == structures.TESTNET_GNOMON_SCID {
-			logger.Printf("[API] Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
-			reply["variables"] = variables
+		if (scid == "0000000000000000000000000000000000000000000000000000000000000001" || scid == structures.MAINNET_GNOMON_SCID || scid == structures.TESTNET_GNOMON_SCID) && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeSCVarsByHeight] Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
+			reply["variables"] = nil
 
 			err := json.NewEncoder(writer).Encode(reply)
 			if err != nil {
@@ -459,9 +522,33 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 		case "gravdb":
 			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
 			variables = apiServer.GravDBBackend.GetAllSCIDVariableDetails(scid)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
 		case "boltdb":
 			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
 			variables = apiServer.BBSBackend.GetAllSCIDVariableDetails(scid)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
 		}
 
 		reply["variables"] = variables
@@ -534,6 +621,21 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 		allNormTxWithSCIDBySCID = apiServer.BBSBackend.GetAllNormalTxWithSCIDBySCID(scid)
 	}
 
+	// Case to ignore large variable returns
+	if (len(allNormTxWithSCIDByAddr) > structures.MAX_API_VAR_RETURN || len(allNormTxWithSCIDBySCID) > structures.MAX_API_VAR_RETURN) && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-NormalTxWithSCID] Tried to return more than %d... DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["normtxwithscidbyaddr"] = nil
+		reply["normtxwithscidbyaddrcount"] = 0
+		reply["normtxwithscidbyscid"] = nil
+		reply["normtxwithscidbyscidcount"] = 0
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
+
 	reply["normtxwithscidbyaddr"] = allNormTxWithSCIDByAddr
 	reply["normtxwithscidbyaddrcount"] = len(allNormTxWithSCIDByAddr)
 	reply["normtxwithscidbyscid"] = allNormTxWithSCIDBySCID
@@ -560,6 +662,19 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 	case "boltdb":
 		invalidscids = apiServer.BBSBackend.GetInvalidSCIDDeploys()
 	}
+
+	// Case to ignore large variable returns
+	if len(invalidscids) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-InvalidSCIDStats] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["invalidscids"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
+
 	reply["invalidscids"] = invalidscids
 
 	err := json.NewEncoder(writer).Encode(reply)
@@ -610,6 +725,18 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 		allMiniBlocksByBlid = apiServer.GravDBBackend.GetMiniblockDetailsByHash(blid)
 	case "boltdb":
 		allMiniBlocksByBlid = apiServer.BBSBackend.GetMiniblockDetailsByHash(blid)
+	}
+
+	// Case to ignore large variable returns
+	if len(allMiniBlocksByBlid) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-MBLLookupByHash] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["mbl"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
 	}
 
 	reply["mbl"] = allMiniBlocksByBlid
@@ -696,6 +823,18 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 		allMiniBlocks = apiServer.GravDBBackend.GetAllMiniblockDetails()
 	case "boltdb":
 		allMiniBlocks = apiServer.BBSBackend.GetAllMiniblockDetails()
+	}
+
+	// Case to ignore large variable returns
+	if len(allMiniBlocks) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-MBLLookupAll] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["mbl"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
 	}
 
 	reply["mbl"] = allMiniBlocks
