@@ -59,7 +59,6 @@ Options:
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
-  --enable-experimental-scvarstore     Enables storing of the scid variables per interaction as a difference rather than the entire store. Much less storage usage, however unoptimized diff and will take significantly longer currently. This option will be removed in future.
   --remove-api-throttle     Removes the api throttle against number of sc variables, sc invoke data etc. to return
   --sf-scid-exclusions=<"a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4;;;c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2">     Defines a scid or scids (use const separator [default ';;;']) to be excluded from indexing regardless of search-filter. If nothing is defined, all scids that match the search-filter will be indexed.
   --skip-gnomonsc-index     If the gnomonsc is caught within the supplied search filter, you can skip indexing that SC given the size/depth of calls to that SC for increased sync times.
@@ -236,12 +235,6 @@ func main() {
 		ramstore = true
 	}
 
-	// Enable experimental (to be removed later) sc variable diff storage. Saves space, computation takes time until it is optimized for general use and this option goes away
-	var experimentalscvars bool
-	if arguments["--enable-experimental-scvarstore"] != nil && arguments["--enable-experimental-scvarstore"].(bool) == true {
-		experimentalscvars = true
-	}
-
 	// Enable api throttle (or disable if set)
 	api_throttle := true
 	if arguments["--remove-api-throttle"] != nil && arguments["--remove-api-throttle"].(bool) == true {
@@ -320,7 +313,7 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, experimentalscvars, sf_scid_exclusions)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, sf_scid_exclusions)
 
 	switch Gnomon.RunMode {
 	case "daemon":
