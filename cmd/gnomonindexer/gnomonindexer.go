@@ -750,7 +750,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					var count int64
 					for k, _ := range sclist {
-						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil, true)
+						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil, false)
 						var pc int
 						for kb, vb := range cbal {
 							if vb > 0 {
@@ -758,9 +758,46 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 									fmt.Printf("%v:", k)
 								}
 								if kb == "0000000000000000000000000000000000000000000000000000000000000000" {
-									fmt.Printf("_DERO: %v", vb)
+									fmt.Printf("_DERO: %v\n", vb)
 								} else {
-									fmt.Printf("_Asset: %v:%v", kb, vb)
+									fmt.Printf("_Asset: %v:%v\n", kb, vb)
+								}
+								pc++
+							}
+						}
+						count++
+					}
+
+					if count == 0 {
+						logger.Printf("No SCIDs installed matching %v", line_parts[1])
+					}
+				}
+			} else if len(line_parts) == 2 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					var count int64
+					for k, _ := range sclist {
+						if k != line_parts[1] {
+							continue
+						}
+						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil, false)
+						var pc int
+						for kb, vb := range cbal {
+							if vb > 0 {
+								if pc == 0 {
+									fmt.Printf("%v:\n", k)
+								}
+								if kb == "0000000000000000000000000000000000000000000000000000000000000000" {
+									fmt.Printf("_DERO: %v\n", vb)
+								} else {
+									fmt.Printf("_Asset: %v:%v\n", kb, vb)
 								}
 								pc++
 							}
@@ -773,7 +810,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 				}
 			} else {
-				logger.Printf("listsc_byscid needs a single scid as argument")
+				logger.Printf("listsc_byscid needs a single scid or no SCIDs as argument")
 			}
 		case command == "listsc_byentrypoint":
 			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
@@ -1230,13 +1267,14 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
 	io.WriteString(w, "\t\033[1mversion\033[0m\t\tShow gnomon version\n")
 	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
+	io.WriteString(w, "\t\033[1mlistsc_hardcoded\033[0m\t\tLists all hardcoded scids\n")
 	io.WriteString(w, "\t\033[1mlistsc_code\033[0m\t\tLists SCID code, listsc_code <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
 	//io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed, listsc_byheight\n")
-	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0, listsc_balances\n")
+	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byentrypoint\033[0m\tLists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate()\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>\n")
