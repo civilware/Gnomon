@@ -887,6 +887,59 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						logger.Printf("No SCIDs with initialize called.")
 					}
 				}
+			} else if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					var count, count2 int64
+					for k, _ := range sclist {
+						if k != line_parts[1] {
+							continue
+						}
+						var indexbyentry []*structures.SCTXParse
+						switch vi.DBType {
+						case "gravdb":
+							indexbyentry = vi.GravDBBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						case "boltdb":
+							indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
+						}
+						for _, v := range indexbyentry {
+							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+							// If action is 'installsc' we don't need to return results for this
+							if sc_action == "1" {
+								continue
+							}
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							count++
+						}
+						var indexbyentry2 []*structures.SCTXParse
+						switch vi.DBType {
+						case "gravdb":
+							indexbyentry2 = vi.GravDBBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						case "boltdb":
+							indexbyentry2 = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
+						}
+						for _, v := range indexbyentry2 {
+							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+							// If action is 'installsc' we don't need to return results for this
+							if sc_action == "1" {
+								continue
+							}
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							count2++
+						}
+					}
+
+					if count == 0 && count2 == 0 {
+						logger.Printf("No SCIDs with initialize called.")
+					}
+				}
 			} else {
 				logger.Printf("listsc_byscid needs a single scid and entrypoint as argument")
 			}
@@ -1286,7 +1339,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed, listsc_byheight\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byentrypoint\033[0m\tLists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate()\n")
+	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate() or to a specific SC is defined, listsc_byinitialize || listsc_byinitialize <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluestored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluelive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>\n")
