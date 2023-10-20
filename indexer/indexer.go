@@ -71,17 +71,12 @@ type Indexer struct {
 // Defines the number of blocks to jump when testing pruned nodes.
 const block_jump = int64(10000)
 
-// String set of hardcoded scids which are appended to in NewIndexer. These are used for reference points such as ignoring invoke calls for indexer.Fastsync == true among other procedures.
-var hardcodedscids []string
-
 var Connected bool = false
 
 // local logger
 var logger *logrus.Entry
 
 func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, sfscidexclusion []string) *Indexer {
-	hardcodedscids = append(hardcodedscids, "0000000000000000000000000000000000000000000000000000000000000001")
-
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	return &Indexer{
@@ -182,7 +177,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		}
 	}
 
-	for _, vi := range hardcodedscids {
+	for _, vi := range structures.Hardcoded_SCIDS {
 		if scidExist(indexer.ValidatedSCs, vi) {
 			// Hardcoded SCID already exists, no need to re-add
 			continue
@@ -193,7 +188,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			continue
 		}
 
-		scVars, scCode, _, _ := indexer.RPC.GetSCVariables(vi, storedindex, nil, nil, nil)
+		scVars, scCode, _, _ := indexer.RPC.GetSCVariables(vi, storedindex, nil, nil, nil, false)
 
 		var contains bool
 
@@ -322,7 +317,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			}
 
 			// All could be future optimized .. for now it's slower but works.
-			variables, code, _, err := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight, nil, nil, nil)
+			variables, code, _, err := indexer.RPC.GetSCVariables(gnomon_scid, indexer.ChainHeight, nil, nil, nil, false)
 			if err == nil && len(variables) > 0 {
 				_ = code
 				keysstring, _, _ := indexer.GetSCIDValuesByKey(variables, gnomon_scid, "signature", indexer.ChainHeight)
@@ -779,7 +774,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				return
 			} else {
 				// Validate SCID is *actually* a valid SCID
-				scVars, scCode, _, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil)
+				scVars, scCode, _, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil, false)
 
 				var contains bool
 
@@ -1492,7 +1487,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 					logger.Debugf("[indexInvokes-installsc] SCID %v does not contain the search filter string, moving on.", bl_sctxs[i].Scid)
 				} else {
 					// Gets the SC variables (key/value) at a given topoheight and then stores them
-					scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+					scVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
 
 					if len(scVars) > 0 {
 						// Append into db for validated SC
@@ -1636,7 +1631,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 					// Validate SCID is *actually* a valid SCID
 					// This assumes we can return all variables.
 					// TODO: For daemon v139 should we append []string "C" to lookup key C to confirm if >1024 k/v pairs exist?
-					valVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+					valVars, _, _, _ := indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
 
 					// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 					if len(valVars) > 0 {
@@ -1700,9 +1695,10 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								// We can pre-get the relevant scvar details outside a write block due to daemon lookup and nothing relevant to db stores
 								var scVarsDiff []*structures.SCIDVariable
 								var scVars []*structures.SCIDVariable
+								var scCode string
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
+								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.Fastsync {
 									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 									return
 								} else {
@@ -1710,7 +1706,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									scVarsDiff = indexer.GravDBBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
 
 									// Gets the SC variables (key/value) at a given topoheight
-									scVars, _, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+									scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
 								}
 
 								for indexer.GravDBBackend.Writing == 1 {
@@ -1735,6 +1731,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									}
 								}
 
+								indexer.InterpretSC(bl_sctxs[i].Scid, scCode)
 								scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 								if err != nil {
 									// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
@@ -1775,9 +1772,10 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								var scVarsDiff []*structures.SCIDVariable
 								//var scVarsDiff2 []*structures.SCIDVariable
 								var scVars []*structures.SCIDVariable
+								var scCode string
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(hardcodedscids, bl_sctxs[i].Scid) && indexer.Fastsync {
+								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.Fastsync {
 									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
 									return
 								} else {
@@ -1785,7 +1783,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									scVarsDiff = indexer.BBSBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
 
 									// Gets the SC variables (key/value) at a given topoheight
-									scVars, _, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil)
+									scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
 								}
 
 								for indexer.BBSBackend.Writing == 1 {
@@ -1806,6 +1804,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 									//indexer.BBSBackend.Writer = ""
 									return err
 								}
+								indexer.InterpretSC(bl_sctxs[i].Scid, scCode)
 								scVarsStore, err := indexer.DiffSCIDVariables(scVarsDiff, scVars, bl_sctxs[i].Scid, bl_txns.Topoheight)
 								if err != nil {
 									// This could be flagged as 'err' if say there were no variables to begin with and still. Is that necessary?
@@ -2100,11 +2099,16 @@ func (indexer *Indexer) getWalletHeight() {
 }
 
 // Gets SC variable details
-func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 []uint64, keysstring []string, keysbytes [][]byte) (variables []*structures.SCIDVariable, code string, balances map[string]uint64, err error) {
+func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 []uint64, keysstring []string, keysbytes [][]byte, codeonly bool) (variables []*structures.SCIDVariable, code string, balances map[string]uint64, err error) {
 	//balances = make(map[string]uint64)
 
 	var getSCResults rpc.GetSC_Result
-	getSCParams := rpc.GetSC_Params{SCID: scid, Code: true, Variables: true, TopoHeight: topoheight}
+	var getSCParams rpc.GetSC_Params
+	if codeonly {
+		getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight}
+	} else {
+		getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: true, TopoHeight: topoheight}
+	}
 	if client.WS == nil {
 		return
 	}
@@ -2251,7 +2255,7 @@ func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable,
 	// If variables were not provided, then fetch them.
 	if len(variables) <= 0 {
 		// Can't pass the val interface{} as the input params for getsc only are in reference to key lookup or all variables return (edge in event of v139 daemon)
-		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, nil, nil, nil)
+		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, nil, nil, nil, false)
 		if err != nil {
 			logger.Errorf("[GetSCIDKeysByValue] ERROR during GetSCVariables - %v", err)
 			return
@@ -2322,7 +2326,7 @@ func (indexer *Indexer) GetSCIDValuesByKey(variables []*structures.SCIDVariable,
 			// Nothing - expect only string/uint64 for value types
 		}
 
-		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, keysuint64, keysstring, keysbytes)
+		variables, _, _, err = indexer.RPC.GetSCVariables(scid, height, keysuint64, keysstring, keysbytes, false)
 		if err != nil {
 			logger.Errorf("[GetSCIDValuesByKey] ERROR during GetSCVariables - %v", err)
 			return

@@ -455,6 +455,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					logger.Printf("SCID: %v ; Owner: %v", k, v)
 				}
 			}
+		case command == "listsc_hardcoded":
+			// Simple print out of hardcoded scid for reference point
+			for _, s := range structures.Hardcoded_SCIDS {
+				logger.Printf("%s", s)
+			}
 		case command == "listsc_code":
 			switch len(line_parts) {
 			case 2:
@@ -468,7 +473,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					case "boltdb":
 						owner = vi.BBSBackend.GetOwner(line_parts[1])
 					}
-					_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil, true)
 					if err != nil {
 						logger.Errorf("%v", err)
 					}
@@ -498,7 +503,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							owner = vi.BBSBackend.GetOwner(line_parts[1])
 						}
-						_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
+						_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil, true)
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
@@ -536,7 +541,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					case "boltdb":
 						owner = vi.BBSBackend.GetOwner(line_parts[1])
 					}
-					vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil, false)
 					if err != nil {
 						logger.Errorf("%v", err)
 					}
@@ -571,7 +576,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							owner = vi.BBSBackend.GetOwner(line_parts[1])
 						}
-						vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil)
+						vars, _, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil, false)
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
@@ -745,7 +750,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					var count int64
 					for k, _ := range sclist {
-						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil)
+						_, _, cbal, _ := vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil, true)
 						var pc int
 						for kb, vb := range cbal {
 							if vb > 0 {
@@ -1050,7 +1055,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
-					variables, code, _, _ := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil)
+					variables, code, _, _ := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil, false)
 					keysstring, _, _ := vi.GetSCIDValuesByKey(variables, line_parts[1], "signature", vi.ChainHeight)
 
 					// Check  if keysstring is nil or not to avoid any sort of panics

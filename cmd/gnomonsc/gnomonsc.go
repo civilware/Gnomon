@@ -264,7 +264,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 
 	var changes bool
 	var variables []*structures.SCIDVariable
-	variables, _, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight, nil, nil, nil)
+	variables, _, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight, nil, nil, nil, false)
 
 	logger.Printf("[runGnomonIndexer] Looping through discovered SCs and checking to see if any are not indexed.")
 	var perc float64
@@ -302,7 +302,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 			if len(search_filter) == 0 {
 				contains = true
 			} else {
-				_, code, _, _ = defaultIndexer.RPC.GetSCVariables(v.SCID, defaultIndexer.ChainHeight, nil, nil, nil)
+				_, code, _, _ = defaultIndexer.RPC.GetSCVariables(v.SCID, defaultIndexer.ChainHeight, nil, nil, nil, true)
 				// Ensure scCode is not blank (e.g. an invalid scid)
 				if code != "" {
 					for _, sfv := range search_filter {
@@ -372,7 +372,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				if inputsc {
 					logger.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'", v.SCID)
 					// TODO: Support for authenticator/user:password rpc login for wallet interactions
-					inputscid(v.SCID, v.Owner, v.Height)
+					inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
 				}
 			}
 		}
@@ -387,7 +387,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 	logger.Printf("[runGnomonIndexer] Indexer closed.")
 }
 
-func inputscid(inpscid string, scowner string, deployheight uint64) {
+func inputscid(inpscid string, scowner string, deployheight uint64, defaultIndexer *indexer.Indexer) {
 	// Get gas estimate based on updatecode function to calculate appropriate storage fees to append
 	var rpcArgs = rpc.Arguments{}
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "entrypoint", DataType: "S", Value: "InputSCID"})
@@ -396,10 +396,10 @@ func inputscid(inpscid string, scowner string, deployheight uint64) {
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "deployheight", DataType: "U", Value: deployheight})
 	var transfers []rpc.Transfer
 
-	sendtx(rpcArgs, transfers)
+	sendtx(rpcArgs, transfers, defaultIndexer)
 }
 
-func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer) {
+func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer, defaultIndexer *indexer.Indexer) {
 	var err error
 	var gasstr rpc.GasEstimate_Result
 	var addr rpc.GetAddress_Result
@@ -456,6 +456,17 @@ func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer) {
 
 			if targetTH <= info.TopoHeight {
 				prevTH = info.TopoHeight
+
+				// Check txpool to see if current txns exist for indexing of same SCID
+				var txpool []string
+				txpool, err = defaultIndexer.RPC.GetTxPool()
+				if err != nil {
+					logger.Errorf("[runGnomonIndexer-GetTxPool] ERROR Getting TX Pool - %v . Skipping index of SCID '%v' for safety.", err, scid)
+					continue
+				} else {
+					logger.Printf("[runGnomonIndexer-GetTxPool] TX Pool List - %v", txpool)
+				}
+
 				break
 			} else {
 				logger.Printf("[sendtx] Waiting until topoheights line up to send next TX [last: %v / curr: %v]", info.TopoHeight, targetTH)
