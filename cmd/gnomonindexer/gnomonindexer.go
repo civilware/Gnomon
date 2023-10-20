@@ -772,7 +772,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						logger.Printf("No SCIDs installed matching %v", line_parts[1])
 					}
 				}
-			} else if len(line_parts) == 2 {
+			} else if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					var sclist map[string]string
