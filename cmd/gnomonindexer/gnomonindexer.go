@@ -857,6 +857,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
 						}
 						for _, v := range indexbyentry {
+							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+							// If action is 'installsc' we don't need to return results for this
+							if sc_action == "1" {
+								continue
+							}
 							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							count++
 						}
@@ -868,6 +873,11 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							indexbyentry2 = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
 						}
 						for _, v := range indexbyentry2 {
+							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+							// If action is 'installsc' we don't need to return results for this
+							if sc_action == "1" {
+								continue
+							}
 							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
 							count2++
 						}
