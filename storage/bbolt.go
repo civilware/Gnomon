@@ -327,7 +327,6 @@ func (bbs *BboltStore) StoreInvokeDetails(scid string, signer string, entrypoint
 
 	txidLen := len(invokedetails.Txid)
 	key := signer + ":" + invokedetails.Txid[0:3] + invokedetails.Txid[txidLen-3:txidLen] + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
-	logger.Printf("[StoreInvokeDetails] Writing key %s", key)
 
 	err = bbs.DB.Update(func(tx *bolt.Tx) (err error) {
 		b, err := tx.CreateBucketIfNotExists([]byte(bName))
