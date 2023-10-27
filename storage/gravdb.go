@@ -603,7 +603,10 @@ func (g *GravitonStore) StoreInvokeDetails(scid string, signer string, entrypoin
 			return tree, changes, terr
 		}
 	}
-	key := signer + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
+
+	txidLen := len(invokedetails.Txid)
+	key := signer + ":" + invokedetails.Txid[0:3] + invokedetails.Txid[txidLen-3:txidLen] + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
+
 	tree.Put([]byte(key), confBytes) // insert a value
 	changes = true
 	if !nocommit {
