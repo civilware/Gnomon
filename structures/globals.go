@@ -16,7 +16,7 @@ const TESTNET_GNOMON_SCID = "c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474f
 const MAX_API_VAR_RETURN = 1024
 
 // Major.Minor.Patch-Iteration
-var Version = semver.MustParse("1.1.1-alpha.32")
+var Version = semver.MustParse("1.1.1-alpha.33")
 
 // Hardcoded Smart Contracts of DERO Network
 // TODO: Possibly in future we can pull this from derohe codebase
