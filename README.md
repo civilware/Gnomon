@@ -22,7 +22,7 @@ Built for the masses.
 - [Documentation](#documentation)
 - [GnomonIndexer (CLI)](#gnomonindexer-cli)
   - [CLI Help](#cli-help)
-- [Using Gnomon As A Package](#using-gnomon-as-a-package)
+- [Using Gnomon As A Go Package](#using-gnomon-as-a-go-package)
   - [Search Filter(s)](#search-filters)
   - [Setting Up Database](#setting-up-database)
     - [BoltDB](#boltdb)
@@ -86,7 +86,7 @@ commands:
 	quit		Quit the daemon
 ```
 
-## Using Gnomon As A Package
+## Using Gnomon As A Go Package
 Gnomon is written with the expectation that the primary use case would be consuming it as a go package. The basis is to be able to leverage it for your own dApps or other configurations which may need to track specific contracts or data and use it appropriately. You can also use it as a [standalone command line interface](#gnomonindexer).
 
 ### Search Filter(s)
