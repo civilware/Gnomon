@@ -2,8 +2,9 @@ package api
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -11,20 +12,31 @@ import (
 	store "github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 )
 
 type ApiServer struct {
-	Config    *structures.APIConfig
-	Stats     atomic.Value
-	StatsIntv time.Duration
-	Backend   *store.GravitonStore
+	Config        *structures.APIConfig
+	Stats         atomic.Value
+	StatsIntv     time.Duration
+	GravDBBackend *store.GravitonStore
+	BBSBackend    *store.BboltStore
+	DBType        string
 }
 
+// local logger
+var logger *logrus.Entry
+
 // Configures a new API server to be used
-func NewApiServer(cfg *structures.APIConfig, backend *store.GravitonStore) *ApiServer {
+func NewApiServer(cfg *structures.APIConfig, gravdbbackend *store.GravitonStore, bbsbackend *store.BboltStore, dbtype string) *ApiServer {
+
+	logger = structures.Logger.WithFields(logrus.Fields{})
+
 	return &ApiServer{
-		Config:  cfg,
-		Backend: backend,
+		Config:        cfg,
+		GravDBBackend: gravdbbackend,
+		BBSBackend:    bbsbackend,
+		DBType:        dbtype,
 	}
 }
 
@@ -33,7 +45,7 @@ func (apiServer *ApiServer) Start() {
 
 	apiServer.StatsIntv, _ = time.ParseDuration(apiServer.Config.StatsCollectInterval)
 	statsTimer := time.NewTimer(apiServer.StatsIntv)
-	log.Printf("[API] Set stats collect interval to %v\n", apiServer.StatsIntv)
+	logger.Printf("[API] Set stats collect interval to %v", apiServer.StatsIntv)
 
 	apiServer.collectStats()
 
@@ -59,7 +71,7 @@ func (apiServer *ApiServer) Start() {
 
 // Sets up the non-SSL API listener
 func (apiServer *ApiServer) listen() {
-	log.Printf("[API] Starting API on %v\n", apiServer.Config.Listen)
+	logger.Printf("[API] Starting API on %v", apiServer.Config.Listen)
 	router := mux.NewRouter()
 	router.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	router.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
@@ -74,13 +86,13 @@ func (apiServer *ApiServer) listen() {
 	router.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServe(apiServer.Config.Listen, router)
 	if err != nil {
-		log.Fatalf("[API] Failed to start API: %v\n", err)
+		logger.Fatalf("[API] Failed to start API: %v", err)
 	}
 }
 
 // Sets up the SSL API listener
 func (apiServer *ApiServer) listenSSL() {
-	log.Printf("[API] Starting SSL API on %v\n", apiServer.Config.SSLListen)
+	logger.Printf("[API] Starting SSL API on %v", apiServer.Config.SSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/indexedscs", apiServer.StatsIndex)
 	routerSSL.HandleFunc("/api/indexbyscid", apiServer.InvokeIndexBySCID)
@@ -95,19 +107,19 @@ func (apiServer *ApiServer) listenSSL() {
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.SSLListen, apiServer.Config.CertFile, apiServer.Config.KeyFile, routerSSL)
 	if err != nil {
-		log.Fatalf("[API] Failed to start SSL API: %v\n", err)
+		logger.Fatalf("[API] Failed to start SSL API: %v", err)
 	}
 }
 
 // Sets up a separate getinfo SSL listener. Use cases is for things like benchmark.dero.network and others that may want to consume a https endpoint of derod getinfo or other future command output
 func (apiServer *ApiServer) getInfoListenSSL() {
-	log.Printf("[API] Starting GetInfo SSL API on %v\n", apiServer.Config.GetInfoSSLListen)
+	logger.Printf("[API] Starting GetInfo SSL API on %v", apiServer.Config.GetInfoSSLListen)
 	routerSSL := mux.NewRouter()
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
 	err := http.ListenAndServeTLS(apiServer.Config.GetInfoSSLListen, apiServer.Config.GetInfoCertFile, apiServer.Config.GetInfoKeyFile, routerSSL)
 	if err != nil {
-		log.Fatalf("[API] Failed to start GetInfo SSL API: %v\n", err)
+		logger.Fatalf("[API] Failed to start GetInfo SSL API: %v", err)
 	}
 }
 
@@ -121,18 +133,89 @@ func notFound(writer http.ResponseWriter, _ *http.Request) {
 
 // Continuous check on number of validated scs etc. for base stats of service.
 func (apiServer *ApiServer) collectStats() {
-	if apiServer.Backend.Closing {
-		return
+	switch apiServer.DBType {
+	case "gravdb":
+		if apiServer.GravDBBackend.Closing {
+			return
+		}
+	case "boltdb":
+		if apiServer.BBSBackend.Closing {
+			return
+		}
 	}
+
 	stats := make(map[string]interface{})
+	sclist := make(map[string]string)
+
+	// TODO: Removeme
+	var scinstalls []*structures.SCTXParse
+	switch apiServer.DBType {
+	case "gravdb":
+		sclist = apiServer.GravDBBackend.GetAllOwnersAndSCIDs()
+	case "boltdb":
+		sclist = apiServer.BBSBackend.GetAllOwnersAndSCIDs()
+	}
+	for k, _ := range sclist {
+		switch apiServer.DBType {
+		case "gravdb":
+			if apiServer.GravDBBackend.Closing {
+				return
+			}
+		case "boltdb":
+			if apiServer.BBSBackend.Closing {
+				return
+			}
+		}
+
+		var invokedetails []*structures.SCTXParse
+		switch apiServer.DBType {
+		case "gravdb":
+			invokedetails = apiServer.GravDBBackend.GetAllSCIDInvokeDetails(k)
+		case "boltdb":
+			invokedetails = apiServer.BBSBackend.GetAllSCIDInvokeDetails(k)
+		}
+		i := 0
+		for _, v := range invokedetails {
+			sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+			if sc_action == "1" {
+				i++
+				scinstalls = append(scinstalls, v)
+			}
+		}
+	}
+
+	if len(scinstalls) > 0 {
+		// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+		sort.SliceStable(scinstalls, func(i, j int) bool {
+			return scinstalls[i].Height < scinstalls[j].Height
+		})
+	}
+
+	var lastQueries []*structures.GnomonSCIDQuery
+
+	for _, v := range scinstalls {
+		curr := &structures.GnomonSCIDQuery{Owner: v.Sender, Height: uint64(v.Height), SCID: v.Scid}
+		lastQueries = append(lastQueries, curr)
+	}
 
 	// Get all scid:owner
-	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
-	regTxCount := apiServer.Backend.GetTxCount("registration")
-	burnTxCount := apiServer.Backend.GetTxCount("burn")
-	normTxCount := apiServer.Backend.GetTxCount("normal")
+	// TODO: Re-add
+	//sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	var regTxCount, burnTxCount, normTxCount int64
+	switch apiServer.DBType {
+	case "gravdb":
+		regTxCount = apiServer.GravDBBackend.GetTxCount("registration")
+		burnTxCount = apiServer.GravDBBackend.GetTxCount("burn")
+		normTxCount = apiServer.GravDBBackend.GetTxCount("normal")
+	case "boltdb":
+		regTxCount = apiServer.BBSBackend.GetTxCount("registration")
+		burnTxCount = apiServer.BBSBackend.GetTxCount("burn")
+		normTxCount = apiServer.BBSBackend.GetTxCount("normal")
+	}
+
 	stats["numscs"] = len(sclist)
 	stats["indexedscs"] = sclist
+	stats["indexdetails"] = lastQueries
 	stats["regTxCount"] = regTxCount
 	stats["burnTxCount"] = burnTxCount
 	stats["normTxCount"] = normTxCount
@@ -152,6 +235,7 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 	if stats != nil {
 		reply["numscs"] = stats["numscs"]
 		reply["indexedscs"] = stats["indexedscs"]
+		reply["indexdetails"] = stats["indexdetails"]
 		reply["regTxCount"] = stats["regTxCount"]
 		reply["burnTxCount"] = stats["burnTxCount"]
 		reply["normTxCount"] = stats["normTxCount"]
@@ -162,7 +246,7 @@ func (apiServer *ApiServer) StatsIndex(writer http.ResponseWriter, _ *http.Reque
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -191,7 +275,7 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		logger.Debugf("[API] URL Param 'scid' is missing. Debugging only.")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -200,13 +284,19 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing.\n")
+		logger.Debugf("[API] URL Param 'address' is missing.")
 	} else {
 		address = addresskeys[0]
 	}
 
 	// Get all scid:owner
-	sclist := apiServer.Backend.GetAllOwnersAndSCIDs()
+	sclist := make(map[string]string)
+	switch apiServer.DBType {
+	case "gravdb":
+		sclist = apiServer.GravDBBackend.GetAllOwnersAndSCIDs()
+	case "boltdb":
+		sclist = apiServer.BBSBackend.GetAllOwnersAndSCIDs()
+	}
 
 	if address != "" && scid != "" {
 		// Return results that match both address and scid
@@ -214,11 +304,28 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 
 		for k := range sclist {
 			if k == scid {
-				addrscidinvokes = apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				switch apiServer.DBType {
+				case "gravdb":
+					addrscidinvokes = apiServer.GravDBBackend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				case "boltdb":
+					addrscidinvokes = apiServer.BBSBackend.GetAllSCIDInvokeDetailsBySigner(scid, address)
+				}
 				break
 			}
 		}
 
+		// Case to ignore large variable returns
+		if len(addrscidinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["addrscidinvokescount"] = 0
+			reply["addrscidinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
 		reply["addrscidinvokescount"] = len(addrscidinvokes)
 		reply["addrscidinvokes"] = addrscidinvokes
 	} else if address != "" && scid == "" {
@@ -226,25 +333,64 @@ func (apiServer *ApiServer) InvokeIndexBySCID(writer http.ResponseWriter, r *htt
 		var addrinvokes [][]*structures.SCTXParse
 
 		for k := range sclist {
-			currinvokedetails := apiServer.Backend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			var currinvokedetails []*structures.SCTXParse
+			switch apiServer.DBType {
+			case "gravdb":
+				currinvokedetails = apiServer.GravDBBackend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			case "boltdb":
+				currinvokedetails = apiServer.BBSBackend.GetAllSCIDInvokeDetailsBySigner(k, address)
+			}
 
 			if currinvokedetails != nil {
 				addrinvokes = append(addrinvokes, currinvokedetails)
 			}
 		}
 
+		// Case to ignore large variable returns
+		if len(addrinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["addrinvokescount"] = 0
+			reply["addrinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
+
 		reply["addrinvokescount"] = len(addrinvokes)
 		reply["addrinvokes"] = addrinvokes
 	} else if address == "" && scid != "" {
 		// If no address and scid only, return invokes of scid
-		scidinvokes := apiServer.Backend.GetAllSCIDInvokeDetails(scid)
+		var scidinvokes []*structures.SCTXParse
+		switch apiServer.DBType {
+		case "gravdb":
+			scidinvokes = apiServer.GravDBBackend.GetAllSCIDInvokeDetails(scid)
+		case "boltdb":
+			scidinvokes = apiServer.BBSBackend.GetAllSCIDInvokeDetails(scid)
+		}
+
+		// Case to ignore large variable returns
+		if len(scidinvokes) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeIndexBySCID] Tried to return more than %d sc indexes for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+			reply["scidinvokescount"] = 0
+			reply["scidinvokes"] = nil
+
+			err := json.NewEncoder(writer).Encode(reply)
+			if err != nil {
+				logger.Errorf("[API] Error serializing API response: %v", err)
+			}
+			return
+		}
+
 		reply["scidinvokescount"] = len(scidinvokes)
 		reply["scidinvokes"] = scidinvokes
 	}
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -273,11 +419,11 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	var height string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		logger.Debugf("[API] URL Param 'scid' is missing. Debugging only.")
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Errorf("[API] Error serializing API response: %v", err)
 		}
 		return
 	} else {
@@ -288,57 +434,121 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 	heightkey, ok := r.URL.Query()["height"]
 
 	if !ok || len(heightkey[0]) < 1 {
-		//log.Printf("URL Param 'height' is missing.\n")
+		logger.Debugf("[API] URL Param 'height' is missing.")
 	} else {
 		height = heightkey[0]
 	}
 
 	if height != "" {
 		var variables []*structures.SCIDVariable
+		var scidInteractionHeights []int64
+		var interactionHeight int64
+
 		var err error
 
 		var topoheight int64
 		topoheight, err = strconv.ParseInt(height, 10, 64)
 		if err != nil {
-			log.Printf("Err converting '%v' to int64 - %v", height, err)
+			logger.Errorf("[API] Err converting '%v' to int64 - %v", height, err)
 
 			err := json.NewEncoder(writer).Encode(reply)
 			if err != nil {
-				log.Printf("[API] Error serializing API response: %v\n", err)
+				logger.Errorf("[API] Error serializing API response: %v", err)
 			}
 		}
 
-		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+		switch apiServer.DBType {
+		case "gravdb":
+			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
 
-		interactionHeight := apiServer.Backend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
+			interactionHeight = apiServer.GravDBBackend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
 
-		// TODO: If there's no interaction height, do we go get scvars against daemon and store?
-		variables = apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
+			variables = apiServer.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
+		case "boltdb":
+			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
+
+			interactionHeight = apiServer.BBSBackend.GetInteractionIndex(topoheight, scidInteractionHeights, false)
+
+			// TODO: If there's no interaction height, do we go get scvars against daemon and store?
+			variables = apiServer.BBSBackend.GetSCIDVariableDetailsAtTopoheight(scid, interactionHeight)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
+		}
 
 		reply["variables"] = variables
 		reply["scidinteractionheight"] = interactionHeight
 	} else {
 		// TODO: Do we need this case? Should we always require a height to be defined so as not to slow the api return due to large dataset? Do we keep but put a limit on return amount?
 
-		variables := make(map[int64][]*structures.SCIDVariable)
+		var variables []*structures.SCIDVariable
+		var scidInteractionHeights []int64
 
 		// Case to ignore all variable instance returns for builtin registration tx - large amount of data.
-		if scid == "0000000000000000000000000000000000000000000000000000000000000001" {
-			log.Printf("Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
-			reply["variables"] = variables
+		if (scid == "0000000000000000000000000000000000000000000000000000000000000001" || scid == structures.MAINNET_GNOMON_SCID || scid == structures.TESTNET_GNOMON_SCID) && apiServer.Config.ApiThrottle {
+			logger.Printf("[API-InvokeSCVarsByHeight] Tried to return all the sc vars of everything at registration builtin... DENIED! Too much data...")
+			reply["variables"] = nil
 
 			err := json.NewEncoder(writer).Encode(reply)
 			if err != nil {
-				log.Printf("[API] Error serializing API response: %v\n", err)
+				logger.Errorf("[API] Error serializing API response: %v", err)
 			}
 			return
 		}
 
-		scidInteractionHeights := apiServer.Backend.GetSCIDInteractionHeight(scid)
+		switch apiServer.DBType {
+		case "gravdb":
+			scidInteractionHeights = apiServer.GravDBBackend.GetSCIDInteractionHeight(scid)
+			variables = apiServer.GravDBBackend.GetAllSCIDVariableDetails(scid)
 
-		for _, h := range scidInteractionHeights {
-			currVars := apiServer.Backend.GetSCIDVariableDetailsAtTopoheight(scid, h)
-			variables[h] = currVars
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
+		case "boltdb":
+			scidInteractionHeights = apiServer.BBSBackend.GetSCIDInteractionHeight(scid)
+			variables = apiServer.BBSBackend.GetAllSCIDVariableDetails(scid)
+
+			// Case to ignore large variable returns
+			if len(variables) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+				logger.Printf("[API-InvokeSCVarsByHeight] Tried to return more than %d sc vars for %s... DENIED! Too much data...", structures.MAX_API_VAR_RETURN, scid)
+				reply["variables"] = nil
+
+				err := json.NewEncoder(writer).Encode(reply)
+				if err != nil {
+					logger.Errorf("[API] Error serializing API response: %v", err)
+				}
+				return
+			}
 		}
 
 		reply["variables"] = variables
@@ -347,7 +557,7 @@ func (apiServer *ApiServer) InvokeSCVarsByHeight(writer http.ResponseWriter, r *
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -376,7 +586,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	var address string
 
 	if !ok || len(scidkeys[0]) < 1 {
-		//log.Printf("URL Param 'scid' is missing. Debugging only.\n")
+		logger.Debugf("[API] URL Param 'scid' is missing. Debugging only.")
 	} else {
 		scid = scidkeys[0]
 	}
@@ -385,7 +595,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 	addresskeys, ok := r.URL.Query()["address"]
 
 	if !ok || len(addresskeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing.\n")
+		logger.Debugf("[API] URL Param 'address' is missing.")
 	} else {
 		address = addresskeys[0]
 	}
@@ -394,13 +604,37 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 		reply["variables"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Errorf("[API] Error serializing API response: %v", err)
 		}
 		return
 	}
 
-	allNormTxWithSCIDByAddr := apiServer.Backend.GetAllNormalTxWithSCIDByAddr(address)
-	allNormTxWithSCIDBySCID := apiServer.Backend.GetAllNormalTxWithSCIDBySCID(scid)
+	var allNormTxWithSCIDByAddr []*structures.NormalTXWithSCIDParse
+	var allNormTxWithSCIDBySCID []*structures.NormalTXWithSCIDParse
+
+	switch apiServer.DBType {
+	case "gravdb":
+		allNormTxWithSCIDByAddr = apiServer.GravDBBackend.GetAllNormalTxWithSCIDByAddr(address)
+		allNormTxWithSCIDBySCID = apiServer.GravDBBackend.GetAllNormalTxWithSCIDBySCID(scid)
+	case "boltdb":
+		allNormTxWithSCIDByAddr = apiServer.BBSBackend.GetAllNormalTxWithSCIDByAddr(address)
+		allNormTxWithSCIDBySCID = apiServer.BBSBackend.GetAllNormalTxWithSCIDBySCID(scid)
+	}
+
+	// Case to ignore large variable returns
+	if (len(allNormTxWithSCIDByAddr) > structures.MAX_API_VAR_RETURN || len(allNormTxWithSCIDBySCID) > structures.MAX_API_VAR_RETURN) && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-NormalTxWithSCID] Tried to return more than %d... DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["normtxwithscidbyaddr"] = nil
+		reply["normtxwithscidbyaddrcount"] = 0
+		reply["normtxwithscidbyscid"] = nil
+		reply["normtxwithscidbyscidcount"] = 0
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
 
 	reply["normtxwithscidbyaddr"] = allNormTxWithSCIDByAddr
 	reply["normtxwithscidbyaddrcount"] = len(allNormTxWithSCIDByAddr)
@@ -409,7 +643,7 @@ func (apiServer *ApiServer) NormalTxWithSCID(writer http.ResponseWriter, r *http
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -420,13 +654,32 @@ func (apiServer *ApiServer) InvalidSCIDStats(writer http.ResponseWriter, _ *http
 	writer.WriteHeader(http.StatusOK)
 
 	reply := make(map[string]interface{})
+	invalidscids := make(map[string]uint64)
 
-	invalidscids := apiServer.Backend.GetInvalidSCIDDeploys()
+	switch apiServer.DBType {
+	case "gravdb":
+		invalidscids = apiServer.GravDBBackend.GetInvalidSCIDDeploys()
+	case "boltdb":
+		invalidscids = apiServer.BBSBackend.GetInvalidSCIDDeploys()
+	}
+
+	// Case to ignore large variable returns
+	if len(invalidscids) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-InvalidSCIDStats] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["invalidscids"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
+
 	reply["invalidscids"] = invalidscids
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -454,24 +707,43 @@ func (apiServer *ApiServer) MBLLookupByHash(writer http.ResponseWriter, r *http.
 	var blid string
 
 	if !ok || len(blidkeys[0]) < 1 {
-		//log.Printf("URL Param 'blid' is missing. Debugging only.\n")
+		logger.Debugf("[API] URL Param 'blid' is missing. Debugging only.")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Errorf("[API] Error serializing API response: %v", err)
 		}
 		return
 	} else {
 		blid = blidkeys[0]
 	}
 
-	allMiniBlocksByBlid := apiServer.Backend.GetMiniblockDetailsByHash(blid)
+	var allMiniBlocksByBlid []*structures.MBLInfo
+
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocksByBlid = apiServer.GravDBBackend.GetMiniblockDetailsByHash(blid)
+	case "boltdb":
+		allMiniBlocksByBlid = apiServer.BBSBackend.GetMiniblockDetailsByHash(blid)
+	}
+
+	// Case to ignore large variable returns
+	if len(allMiniBlocksByBlid) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-MBLLookupByHash] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["mbl"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
 
 	reply["mbl"] = allMiniBlocksByBlid
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -499,24 +771,30 @@ func (apiServer *ApiServer) MBLLookupByAddr(writer http.ResponseWriter, r *http.
 	var addr string
 
 	if !ok || len(addrkeys[0]) < 1 {
-		//log.Printf("URL Param 'address' is missing. Debugging only.\n")
+		logger.Debugf("[API] URL Param 'address' is missing. Debugging only.")
 		reply["mbl"] = nil
 		err := json.NewEncoder(writer).Encode(reply)
 		if err != nil {
-			log.Printf("[API] Error serializing API response: %v\n", err)
+			logger.Errorf("[API] Error serializing API response: %v", err)
 		}
 		return
 	} else {
 		addr = addrkeys[0]
 	}
 
-	allMiniBlocksByAddr := apiServer.Backend.GetMiniblockCountByAddress(addr)
+	var allMiniBlocksByAddr int64
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocksByAddr = apiServer.GravDBBackend.GetMiniblockCountByAddress(addr)
+	case "boltdb":
+		allMiniBlocksByAddr = apiServer.BBSBackend.GetMiniblockCountByAddress(addr)
+	}
 
 	reply["mbl"] = allMiniBlocksByAddr
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -539,13 +817,31 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 		reply["hello"] = "world"
 	}
 
-	allMiniBlocks := apiServer.Backend.GetAllMiniblockDetails()
+	allMiniBlocks := make(map[string][]*structures.MBLInfo)
+	switch apiServer.DBType {
+	case "gravdb":
+		allMiniBlocks = apiServer.GravDBBackend.GetAllMiniblockDetails()
+	case "boltdb":
+		allMiniBlocks = apiServer.BBSBackend.GetAllMiniblockDetails()
+	}
+
+	// Case to ignore large variable returns
+	if len(allMiniBlocks) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+		logger.Printf("[API-MBLLookupAll] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
+		reply["mbl"] = nil
+
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	}
 
 	reply["mbl"] = allMiniBlocks
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 
@@ -557,12 +853,19 @@ func (apiServer *ApiServer) GetInfo(writer http.ResponseWriter, _ *http.Request)
 
 	reply := make(map[string]interface{})
 
-	info := apiServer.Backend.GetGetInfoDetails()
+	var info *structures.GetInfo
+	switch apiServer.DBType {
+	case "gravdb":
+		info = apiServer.GravDBBackend.GetGetInfoDetails()
+	case "boltdb":
+		info = apiServer.BBSBackend.GetGetInfoDetails()
+	}
+
 	reply["getinfo"] = info
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
-		log.Printf("[API] Error serializing API response: %v\n", err)
+		logger.Errorf("[API] Error serializing API response: %v", err)
 	}
 }
 

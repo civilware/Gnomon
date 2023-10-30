@@ -1,6 +1,9 @@
 package structures
 
 import (
+	"encoding/json"
+
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
 	"github.com/deroproject/derohe/transaction"
 )
@@ -51,6 +54,7 @@ type APIConfig struct {
 	KeyFile              string `json:"keyFile"`
 	GetInfoKeyFile       string `json:"getInfoKeyFile"`
 	MBLLookup            bool   `json:"mbblookup"`
+	ApiThrottle          bool   `json:"apithrottle"`
 }
 
 type SCIDVariable struct {
@@ -60,12 +64,36 @@ type SCIDVariable struct {
 
 type FastSyncImport struct {
 	Owner   string
-	Height  string
+	Height  uint64
 	Headers string
+}
+
+type GnomonSCIDQuery struct {
+	Owner  string
+	Height uint64
+	SCID   string
 }
 
 type SCIDInteractionHeight struct {
 	Heights map[int64]string
 }
 
+type BlockTxns struct {
+	Topoheight int64
+	Tx_hashes  []crypto.Hash
+}
+
 type GetInfo rpc.GetInfo_Result
+
+type JSONRpcReq struct {
+	Id     *json.RawMessage `json:"id"`
+	Method string           `json:"method"`
+	Params *json.RawMessage `json:"params"`
+}
+
+type JSONRpcResp struct {
+	Id      *json.RawMessage `json:"id"`
+	Version string           `json:"jsonrpc"`
+	Result  interface{}      `json:"result"`
+	Error   interface{}      `json:"error"`
+}
