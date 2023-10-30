@@ -20,7 +20,7 @@ Built for the masses.
 ## Table of Contents <!-- omit in toc -->
 - [Contributing](#contributing)
 - [Documentation](#documentation)
-- [GnomonIndexer](#gnomonindexer)
+- [GnomonIndexer (CLI)](#gnomonindexer-cli)
   - [CLI Help](#cli-help)
 - [Using Gnomon As A Package](#using-gnomon-as-a-package)
   - [Search Filter(s)](#search-filters)
@@ -42,7 +42,7 @@ Built for the masses.
 
 [Documentation](./DOCS) including guides, [ROADMAP](./DOCS/ROADMAP.md), [CHANGELOG](./DOCS/CHANGELOG.md) and more.
 
-## GnomonIndexer
+## GnomonIndexer (CLI)
 The [gnomonindexer](/cmd/gnomonindexer/gnomonindexer.go) command line interface allows for kicking off an indexer to analyze the DERO blockchain transactions. This indexer is primarily used for indexing smart contract interactions and asset transactions.
 
 You have the ability to index at a single block at a time to multiple blocks at a time. Keep in mind that the more you increase --num-parallel-blocks the greater the load on gnomonindexer as well as the daemon you're connected to. The number of parallel blocks is defaulted to 1.
