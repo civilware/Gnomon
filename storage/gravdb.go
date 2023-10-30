@@ -118,11 +118,11 @@ func (g *GravitonStore) StoreLastIndexHeight(last_indexedheight int64, nocommit 
 }
 
 // Gets gnomon's last indexed height - this is for stateful stores on close and reference on open
-func (g *GravitonStore) GetLastIndexHeight() int64 {
+func (g *GravitonStore) GetLastIndexHeight() (topoheight int64, err error) {
 	store := g.DB
 	ss, err := store.LoadSnapshot(0) // load most recent snapshot
 	if err != nil {
-		return 0
+		return topoheight, err
 	}
 
 	// Swap DB at g.DBMaxSnapshot+ commits. Check for g.migrating, if so sleep for g.DBMigrateWait ms
@@ -132,7 +132,7 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 		store = g.DB
 		ss, err = store.LoadSnapshot(0) // load most recent snapshot
 		if err != nil {
-			return 0
+			return topoheight, err
 		}
 	}
 
@@ -143,12 +143,11 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 		logger.Errorf("[Graviton-GetLastIndexHeight] ERROR: Tree is nil for 'stats'. Attempting to rollback 1 snapshot")
 		prevss, preverr := store.LoadSnapshot(ss.GetVersion() - 1)
 		if preverr != nil {
-			return 0
+			return topoheight, preverr
 		}
 		tree, terr = prevss.GetTree("stats")
 		if tree == nil {
-			logger.Errorf("[Graviton] ERROR: %v", terr)
-			return 0
+			return topoheight, fmt.Errorf("[Graviton] ERROR: %v", terr)
 		}
 	}
 	key := "lastindexedheight"
@@ -156,17 +155,16 @@ func (g *GravitonStore) GetLastIndexHeight() int64 {
 	v, _ := tree.Get([]byte(key))
 
 	if v != nil {
-		topoheight, err := strconv.ParseInt(string(v), 10, 64)
+		topoheight, err = strconv.ParseInt(string(v), 10, 64)
 		if err != nil {
-			logger.Errorf("ERR - Error parsing stored int for lastindexheight: %v", err)
-			return 0
+			return topoheight, fmt.Errorf("ERR - Error parsing stored int for lastindexheight: %v", err)
 		}
-		return topoheight
+		return topoheight, err
 	}
 
 	logger.Printf("[GetLastIndexHeight] No stored last index height. Starting from 0 or latest if fastsync is enabled")
 
-	return 0
+	return topoheight, err
 }
 
 // Stores gnomon's txcount by a given txType - this is for stateful stores on close and reference on open

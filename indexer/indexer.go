@@ -134,7 +134,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	var storedindex int64
 	switch indexer.DBType {
 	case "gravdb":
-		storedindex = indexer.GravDBBackend.GetLastIndexHeight()
+		storedindex, err = indexer.GravDBBackend.GetLastIndexHeight()
 		if err != nil {
 			logger.Fatalf("[gravdb-StartDaemonMode] Could not get last index height - %v", err)
 		}
