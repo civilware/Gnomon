@@ -21,7 +21,8 @@ Built for the masses.
 - [Contributing](#contributing)
 - [Documentation](#documentation)
 - [GnomonIndexer (CLI)](#gnomonindexer-cli)
-  - [CLI Help](#cli-help)
+  - [GnomonIndexer Run Options](#gnomonindexer-run-options)
+    - [CLI Help](#cli-help)
 - [Using Gnomon As A Go Package](#using-gnomon-as-a-go-package)
   - [Search Filter(s)](#search-filters)
   - [Setting Up Database](#setting-up-database)
@@ -53,7 +54,39 @@ go build .
 ./gnomonindexer --daemon-rpc-address=127.0.0.1:10102 --num-parallel-blocks=5 --debug
 ```
 
-### CLI Help
+### GnomonIndexer Run Options
+
+```
+Gnomon
+Gnomon Indexing Service: Index DERO's blockchain for Smart Contract deployments/listings/etc. as well as other data analysis.
+
+Usage:
+  gnomonindexer [options]
+  gnomonindexer -h | --help
+
+Options:
+  -h --help     Show this screen.
+  --daemon-rpc-address=<127.0.0.1:40402>    Connect to daemon.
+  --api-address=<127.0.0.1:8082>     Host api.
+  --enable-api-ssl     Enable ssl.
+  --api-ssl-address=<127.0.0.1:9092>     Host ssl api.
+  --get-info-ssl-address=<127.0.0.1:9394>     Host GetInfo ssl api. This is to completely isolate it from gnomon api results as a whole. Normal api endpoints also surface the getinfo call if needed.
+  --start-topoheight=<31170>     Define a start topoheight other than 1 if required to index at a higher block (pruned db etc.).
+  --search-filter=<"Function InputStr(input String, varname String) Uint64">     Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
+  --runmode=<daemon>     Defines the runmode of gnomon (daemon/wallet/asset). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
+  --enable-miniblock-lookup     True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
+  --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
+  --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
+  --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
+  --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
+  --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
+  --remove-api-throttle     Removes the api throttle against number of sc variables, sc invoke data etc. to return
+  --sf-scid-exclusions=<"a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4;;;c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2">     Defines a scid or scids (use const separator [default ';;;']) to be excluded from indexing regardless of search-filter. If nothing is defined, all scids that match the search-filter will be indexed.
+  --skip-gnomonsc-index     If the gnomonsc is caught within the supplied search filter, you can skip indexing that SC given the size/depth of calls to that SC for increased sync times.
+  --debug     Enables debug logging
+```
+
+#### CLI Help
 By typing ```help``` via the cli gnomonindexer you can print the below to utilize to interact with the index db.
 
 ```
