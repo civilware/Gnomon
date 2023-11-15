@@ -64,7 +64,7 @@ type Indexer struct {
 	MBLLookup         bool
 	ValidatedSCs      []string
 	CloseOnDisconnect bool
-	Fastsync          bool
+	FastSyncConfig    *structures.FastSyncConfig
 	sync.RWMutex
 }
 
@@ -76,7 +76,7 @@ var Connected bool = false
 // local logger
 var logger *logrus.Entry
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, sfscidexclusion []string) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, skipfsrecheck bool, sfscidexclusion []string) *Indexer {
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	return &Indexer{
@@ -91,7 +91,7 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.Bb
 		RunMode:           runmode,
 		MBLLookup:         mbllookup,
 		CloseOnDisconnect: closeondisconnect,
-		Fastsync:          fastsync,
+		FastSyncConfig:    &structures.FastSyncConfig{Enabled: fastsync, SkipFSRecheck: skipfsrecheck},
 	}
 }
 
@@ -146,7 +146,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	}
 
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
-	if storedindex == 0 && indexer.Fastsync {
+	if storedindex == 0 && indexer.FastSyncConfig.Enabled {
 		logger.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
 		storedindex = indexer.ChainHeight
 	} else if storedindex == 0 {
@@ -307,7 +307,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		}
 
 		// Only pull in gnomonsc data if fastsync is defined. TODO: Maybe extra flag for checking this on startup as well.
-		if getinfo != nil && indexer.Fastsync {
+		if getinfo != nil && indexer.FastSyncConfig.Enabled {
 			// Define gnomon builtin scid for indexing
 			var gnomon_scid string
 			if !getinfo.Testnet {
@@ -384,7 +384,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 						}
 					}
 
-					err := indexer.AddSCIDToIndex(scidstoadd)
+					err := indexer.AddSCIDToIndex(scidstoadd, indexer.FastSyncConfig.SkipFSRecheck)
 					if err != nil {
 						logger.Errorf("[StartDaemonMode-fastsync] ERR - adding scids to index - %v", err)
 					}
@@ -741,7 +741,7 @@ func (indexer *Indexer) StartWalletMode(runType string) {
 }
 
 // Manually add/inject a SCID to be indexed. Checks validity and then stores within owner tree (no signer addr) and stores a set of current variables.
-func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport) (err error) {
+func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyncImport, skipfsrecheck bool) (err error) {
 	var wg sync.WaitGroup
 	wg.Add(len(scidstoadd))
 
@@ -774,21 +774,24 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 				return
 			} else {
 				// Validate SCID is *actually* a valid SCID
-				scVars, scCode, _, _ := indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil, false)
-
+				var scVars []*structures.SCIDVariable
+				var scCode string
 				var contains bool
+				if !skipfsrecheck {
+					scVars, scCode, _, _ = indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil, false)
 
-				// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
-				if len(indexer.SearchFilter) == 0 {
-					contains = true
-				} else {
-					// Ensure scCode is not blank (e.g. an invalid scid)
-					if scCode != "" {
-						for _, sfv := range indexer.SearchFilter {
-							contains = strings.Contains(scCode, sfv)
-							if contains {
-								// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
-								break
+					// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+					if len(indexer.SearchFilter) == 0 {
+						contains = true
+					} else {
+						// Ensure scCode is not blank (e.g. an invalid scid)
+						if scCode != "" {
+							for _, sfv := range indexer.SearchFilter {
+								contains = strings.Contains(scCode, sfv)
+								if contains {
+									// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+									break
+								}
 							}
 						}
 					}
@@ -879,6 +882,55 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 			} else {
 				logger.Debugf("[AddSCIDToIndex] ERR - SCID '%v' doesn't exist at height %v", v.scid, indexer.ChainHeight)
 			}
+		} else if skipfsrecheck {
+			// Generally this clause will be hit if contains is false but also skipfsrecheck is true. This will still store the fastsync data in a limited format
+			indexer.Lock()
+			indexer.ValidatedSCs = append(indexer.ValidatedSCs, v.scid)
+			indexer.Unlock()
+			if v.fsi != nil {
+				logger.Debugf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v / Signer %v", v.scid, v.fsi.Owner)
+			} else {
+				logger.Debugf("[AddSCIDToIndex] SCID matches search filter. Adding SCID %v", v.scid)
+			}
+
+			writeWait, _ := time.ParseDuration("20ms")
+			for tempdb.Writing == 1 {
+				if indexer.Closing {
+					return
+				}
+				//logger.Debugf("[Indexer-NewIndexer] GravitonDB is writing... sleeping for %v...", writeWait)
+				time.Sleep(writeWait)
+			}
+
+			if indexer.Closing {
+				return
+			}
+			tempdb.Writing = 1
+			var ctrees []*graviton.Tree
+
+			var sochanges bool
+			var sotree *graviton.Tree
+			if v.fsi != nil {
+				sotree, sochanges, err = tempdb.StoreOwner(v.scid, v.fsi.Owner, true)
+			} else {
+				sotree, sochanges, err = tempdb.StoreOwner(v.scid, "", true)
+			}
+			if err != nil {
+				logger.Errorf("[AddSCIDToIndex] ERR - storing owner: %v", err)
+			} else {
+				if sochanges {
+					ctrees = append(ctrees, sotree)
+				}
+			}
+			if len(ctrees) > 0 {
+				_, err := tempdb.CommitTrees(ctrees)
+				if err != nil {
+					logger.Errorf("[AddSCIDToIndex] ERR - committing trees: %v", err)
+				} else {
+					//logger.Debugf("[AddSCIDToIndex] DEBUG - cv [%v]", cv)
+				}
+			}
+			tempdb.Writing = 0
 		}
 	}
 
@@ -1249,7 +1301,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			time.Sleep(writeWait)
 		}
 		indexer.GravDBBackend.Writing = 1
-		if regTxCount > 0 && !indexer.Fastsync {
+		if regTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			// Load from mem existing regTxCount and append new value
 			currRegTxCount := indexer.GravDBBackend.GetTxCount("registration")
 			/*
@@ -1276,7 +1328,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			}
 		}
 
-		if burnTxCount > 0 && !indexer.Fastsync {
+		if burnTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			// Load from mem existing burnTxCount and append new value
 			currBurnTxCount := indexer.GravDBBackend.GetTxCount("burn")
 			/*
@@ -1303,7 +1355,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			//indexer.GravDBBackend.Writing = 0
 		}
 
-		if normTxCount > 0 && !indexer.Fastsync {
+		if normTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			/*
 				// Test code for finding highest tps block
 				var io rpc.GetBlockHeaderByHeight_Result
@@ -1404,7 +1456,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 		}
 		indexer.BBSBackend.Writing = 1
 		//indexer.BBSBackend.Writer = "IndexTxCounts"
-		if regTxCount > 0 && !indexer.Fastsync {
+		if regTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			// Load from mem existing regTxCount and append new value
 			currRegTxCount := indexer.BBSBackend.GetTxCount("registration")
 			_, err := indexer.BBSBackend.StoreTxCount(regTxCount+currRegTxCount, "registration")
@@ -1416,7 +1468,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			}
 		}
 
-		if burnTxCount > 0 && !indexer.Fastsync {
+		if burnTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			// Load from mem existing burnTxCount and append new value
 			currBurnTxCount := indexer.BBSBackend.GetTxCount("burn")
 			_, err := indexer.BBSBackend.StoreTxCount(burnTxCount+currBurnTxCount, "burn")
@@ -1428,7 +1480,7 @@ func (indexer *Indexer) indexTxCounts(regTxCount int64, burnTxCount int64, normT
 			}
 		}
 
-		if normTxCount > 0 && !indexer.Fastsync {
+		if normTxCount > 0 && !indexer.FastSyncConfig.Enabled {
 			// Load from mem existing normTxCount and append new value
 			currNormTxCount := indexer.BBSBackend.GetTxCount("normal")
 			_, err := indexer.BBSBackend.StoreTxCount(normTxCount+currNormTxCount, "normal")
@@ -1698,8 +1750,8 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								var scCode string
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
+									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
 									return
 								} else {
 									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
@@ -1775,8 +1827,8 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								var scCode string
 
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.Fastsync {
-									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.Fastsync)
+								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
+									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
 									return
 								} else {
 									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs

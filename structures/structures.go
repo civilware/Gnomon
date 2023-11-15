@@ -62,6 +62,11 @@ type SCIDVariable struct {
 	Value interface{}
 }
 
+type FastSyncConfig struct {
+	Enabled       bool
+	SkipFSRecheck bool
+}
+
 type FastSyncImport struct {
 	Owner   string
 	Height  uint64

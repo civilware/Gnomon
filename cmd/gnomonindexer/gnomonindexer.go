@@ -56,6 +56,7 @@ Options:
   --enable-miniblock-lookup     True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
   --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
+  --skipfsrecheck     True/false value (only relevant when --fastsync is used) to define if SC validity should be re-checked from data coming via Gnomon SC index or not.
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
@@ -219,6 +220,14 @@ func main() {
 		fastsync = true
 	}
 
+	// If fastsync, define whether or not we are skipping re-validation on the scids from gnomon index sc
+	var skipfsrecheck bool
+	if fastsync {
+		if arguments["--skipfsrecheck"] != nil && arguments["--skipfsrecheck"].(bool) == true {
+			skipfsrecheck = true
+		}
+	}
+
 	Gnomon.DBType = "boltdb"
 	if arguments["--dbtype"] != nil {
 		if arguments["--dbtype"] == "boltdb" || arguments["--dbtype"] == "gravdb" {
@@ -313,7 +322,7 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, sf_scid_exclusions)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, skipfsrecheck, sf_scid_exclusions)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -1182,7 +1191,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					logger.Printf("- Indexer '%v'", ki)
 					scidstoadd := make(map[string]*structures.FastSyncImport)
 					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-					err = vi.AddSCIDToIndex(scidstoadd)
+					err = vi.AddSCIDToIndex(scidstoadd, false)
 					if err != nil {
 						logger.Printf("Err - %v", err)
 					}
@@ -1198,7 +1207,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							logger.Printf("- Indexer '%v'", ki)
 							scidstoadd := make(map[string]*structures.FastSyncImport)
 							scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-							//err = vi.AddSCIDToIndex(scidstoadd)
+							//err = vi.AddSCIDToIndex(scidstoadd, false)
 							var blTxns *structures.BlockTxns
 							blTxns.Topoheight = 1352506
 							var h crypto.Hash
