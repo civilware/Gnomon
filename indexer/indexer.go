@@ -806,7 +806,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	}
 	wg.Wait()
 
-	logger.Debugf("[AddSCIDToIndex] SCIDs to Index Stage: %v", scidstoindexstage)
 	for _, v := range scidstoindexstage {
 		if v.contains || varstoreonly {
 			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
