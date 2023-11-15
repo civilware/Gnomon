@@ -761,7 +761,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			// Check if already validated
-			if scidExist(indexer.ValidatedSCs, scid) || indexer.Closing && !varstoreonly {
+			if (scidExist(indexer.ValidatedSCs, scid) || indexer.Closing) && !varstoreonly {
 				//logger.Debugf("[AddSCIDToIndex] SCID '%v' already in validated list.", scid)
 				wg.Done()
 
@@ -806,8 +806,9 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	}
 	wg.Wait()
 
+	logger.Debugf("[AddSCIDToIndex] SCIDs to Index Stage: %v", scidstoindexstage)
 	for _, v := range scidstoindexstage {
-		if v.contains {
+		if v.contains || varstoreonly {
 			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
 			if len(v.scVars) > 0 {
 				indexer.Lock()
