@@ -164,7 +164,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	}
 
 	if len(pre_validatedSCIDs) > 0 {
-		logger.Printf("[StartDaemonMode] Appending pre-validated SCIDs from store to memory.")
+		logger.Printf("[StartDaemonMode] Appending '%d' pre-validated SCIDs from store to memory.", len(pre_validatedSCIDs))
 
 		for k := range pre_validatedSCIDs {
 			if scidExist(indexer.SFSCIDExclusion, k) {
@@ -404,12 +404,13 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	if blockParallelNum <= 0 {
 		blockParallelNum = 1
 	}
-	logger.Printf("[StartDaemonMode] Set number of parallel blocks to index to '%v'", blockParallelNum)
+	logger.Printf("[StartDaemonMode] Set number of parallel blocks to index to '%d'. Starting index routine...", blockParallelNum)
 
 	go func() {
 		k := 0
 		for {
 			if indexer.Closing {
+				logger.Printf("[StartDaemonMode] Closing indexer...")
 				// Break out on closing call
 				break
 			}

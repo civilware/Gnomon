@@ -392,6 +392,26 @@ func inputscid(inpscid string, scowner string, deployheight uint64, defaultIndex
 	var rpcArgs = rpc.Arguments{}
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "entrypoint", DataType: "S", Value: "InputSCID"})
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "scid", DataType: "S", Value: inpscid})
+
+	// If there is no scowner (deployed ring size > 2), then inject the gnomon indexer address
+	// NOTE: Reason for injecting the gnomon indexer address (today) is because in the SC, if we need to remove/modify the entry, the scowner must do that and we don't want to lock it out.
+	if scowner == "" {
+		var addr rpc.GetAddress_Result
+		err := walletRPCClient.CallFor(&addr, "GetAddress")
+		if addr.Address == "" {
+			logger.Errorf("[GetAddress] Failed - %v", err)
+			return
+		}
+
+		scowner = addr.Address
+
+		logger.Printf("[inputsc] scowner for '%s' is nil. Setting owner to '%s' for index management capabilities.", inpscid, addr.Address)
+	}
+
+	if scowner == "" {
+		logger.Errorf("[inputsc] scowner for '%s' is ''. Skipping.", inpscid)
+		return
+	}
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "scowner", DataType: "S", Value: scowner})
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "deployheight", DataType: "U", Value: deployheight})
 	var transfers []rpc.Transfer
@@ -406,6 +426,7 @@ func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer, defaultIndexer *ind
 	err = walletRPCClient.CallFor(&addr, "GetAddress")
 	if addr.Address == "" {
 		logger.Errorf("[GetAddress] Failed - %v", err)
+		return
 	}
 	gasRpc := rpcArgs
 	gasRpc = append(gasRpc, rpc.Argument{Name: "SC_ACTION", DataType: "U", Value: rpc.SC_CALL})
