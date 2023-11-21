@@ -65,6 +65,7 @@ type Indexer struct {
 	ValidatedSCs      []string
 	CloseOnDisconnect bool
 	FastSyncConfig    *structures.FastSyncConfig
+	Status            string
 	sync.RWMutex
 }
 
@@ -104,6 +105,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 			// Break out on closing call
 			break
 		}
+		indexer.Status = "initializing"
 		logger.Printf("[StartDaemonMode] Trying to connect...")
 		err = indexer.RPC.Connect(indexer.Endpoint)
 		if err != nil {
@@ -147,6 +149,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
 	if storedindex == 0 && indexer.FastSyncConfig.Enabled {
+		indexer.Status = "fastsyncing"
 		logger.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
 		storedindex = indexer.ChainHeight
 	} else if storedindex == 0 {
@@ -410,15 +413,19 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		k := 0
 		for {
 			if indexer.Closing {
+				indexer.Status = "closing"
 				logger.Printf("[StartDaemonMode] Closing indexer...")
 				// Break out on closing call
 				break
 			}
 
 			if indexer.LastIndexedHeight >= indexer.ChainHeight {
+				indexer.Status = "indexed"
 				time.Sleep(1 * time.Second)
 				continue
 			}
+
+			indexer.Status = "indexing"
 
 			// Check to cover fastsync scenarios; no reason to pull all this logic into the multi-block scanning components - this will only run once
 			if k == 0 {

@@ -1312,6 +1312,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				} else {
 					logger.Printf("SEARCHFILTER(S) [%d/%d] >> %s", vi.LastIndexedHeight, vi.ChainHeight, strings.Join(vi.SearchFilter, ";;;"))
 				}
+				logger.Printf("STATUS >> %s", vi.Status)
 			}
 		case line == "gnomonsc":
 			logger.Printf("[Mainnet] %s", structures.MAINNET_GNOMON_SCID)
