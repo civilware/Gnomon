@@ -97,10 +97,11 @@ commands:
 	listsc		Lists all indexed scids that match original search filter
 	listsc_hardcoded		Lists all hardcoded scids
 	listsc_code		Lists SCID code, listsc_code <scid>
+	listsc_codematch		Lists SCIDs that match a given search string, listsc_codematch <Test Search String>
 	listsc_variables		Lists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>
 	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress>
 	listsc_byscid	List a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>
-	listsc_byheight	List all indexed scids that match original search filter including height deployed, listsc_byheight
+	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>
 	listsc_balances	Lists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>
 	listsc_byentrypoint	Lists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>
 	listsc_byinitialize	Lists all calls to SCs that attempted to run Initialize or InitializePrivate() or to a specific SC is defined, listsc_byinitialize || listsc_byinitialize <scid>

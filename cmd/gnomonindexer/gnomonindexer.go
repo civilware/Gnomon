@@ -476,13 +476,37 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					var owner string
+					var sccode string
 					switch vi.DBType {
 					case "gravdb":
 						owner = vi.GravDBBackend.GetOwner(line_parts[1])
+						hVars := vi.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], vi.ChainHeight)
+						for _, v := range hVars {
+							switch ckey := v.Key.(type) {
+							case string:
+								if ckey == "C" {
+									sccode = v.Value.(string)
+								}
+							default:
+							}
+						}
 					case "boltdb":
 						owner = vi.BBSBackend.GetOwner(line_parts[1])
+						hVars := vi.BBSBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], vi.ChainHeight)
+						for _, v := range hVars {
+							switch ckey := v.Key.(type) {
+							case string:
+								if ckey == "C" {
+									sccode = v.Value.(string)
+								}
+							default:
+							}
+						}
 					}
-					_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil, true)
+
+					if sccode == "" {
+						_, sccode, _, err = vi.RPC.GetSCVariables(line_parts[1], vi.ChainHeight, nil, nil, nil, true)
+					}
 					if err != nil {
 						logger.Errorf("%v", err)
 					}
@@ -506,13 +530,36 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
 						var owner string
+						var sccode string
 						switch vi.DBType {
 						case "gravdb":
 							owner = vi.GravDBBackend.GetOwner(line_parts[1])
+							hVars := vi.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], int64(s))
+							for _, v := range hVars {
+								switch ckey := v.Key.(type) {
+								case string:
+									if ckey == "C" {
+										sccode = v.Value.(string)
+									}
+								default:
+								}
+							}
 						case "boltdb":
 							owner = vi.BBSBackend.GetOwner(line_parts[1])
+							hVars := vi.BBSBackend.GetSCIDVariableDetailsAtTopoheight(line_parts[1], int64(s))
+							for _, v := range hVars {
+								switch ckey := v.Key.(type) {
+								case string:
+									if ckey == "C" {
+										sccode = v.Value.(string)
+									}
+								default:
+								}
+							}
 						}
-						_, sccode, _, err := vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil, true)
+						if sccode == "" {
+							_, sccode, _, err = vi.RPC.GetSCVariables(line_parts[1], int64(s), nil, nil, nil, true)
+						}
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
@@ -536,6 +583,69 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 			default:
 				logger.Printf("listsc_code needs one value: single scid")
+			}
+		case command == "listsc_codematch":
+			if len(line_parts) >= 2 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					sclist := make(map[string]string)
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					for k, v := range sclist {
+						var sccode string
+						switch vi.DBType {
+						case "gravdb":
+							hVars := vi.GravDBBackend.GetSCIDVariableDetailsAtTopoheight(k, vi.ChainHeight)
+							for _, v := range hVars {
+								switch ckey := v.Key.(type) {
+								case string:
+									if ckey == "C" {
+										sccode = v.Value.(string)
+									}
+								default:
+								}
+							}
+						case "boltdb":
+							hVars := vi.BBSBackend.GetSCIDVariableDetailsAtTopoheight(k, vi.ChainHeight)
+							for _, v := range hVars {
+								switch ckey := v.Key.(type) {
+								case string:
+									if ckey == "C" {
+										sccode = v.Value.(string)
+									}
+								default:
+								}
+							}
+						}
+
+						if sccode == "" {
+							_, sccode, _, err = vi.RPC.GetSCVariables(k, vi.ChainHeight, nil, nil, nil, true)
+						}
+						if err != nil {
+							logger.Errorf("%v", err)
+						}
+
+						if sccode != "" {
+							var contains bool
+
+							if len(line_parts) == 2 {
+								contains = strings.Contains(sccode, line_parts[1])
+							} else {
+								contains = strings.Contains(sccode, strings.Join(line_parts[1:], " "))
+							}
+							if contains {
+								logger.Printf("SCID: %v ; Owner: %v", k, v)
+								//logger.Printf("%s", sccode)
+							}
+						}
+					}
+				}
+			} else {
+				logger.Printf("listsc_codematch needs some string argment to match against")
 			}
 		case command == "listsc_variables":
 			switch len(line_parts) {
@@ -764,8 +874,62 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							logger.Printf("Total SCs installed: %v", len(scinstalls)+1)
 						}
 					}
+				} else if len(line_parts) == 2 {
+					if sh, err := strconv.Atoi(line_parts[1]); err == nil {
+						for ki, vi := range g.Indexers {
+							logger.Printf("- Indexer '%v'", ki)
+							var scinstalls []*structures.SCTXParse
+							var sclist map[string]string
+							switch vi.DBType {
+							case "gravdb":
+								sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+							case "boltdb":
+								sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+							}
+							for k, _ := range sclist {
+								var invokedetails []*structures.SCTXParse
+								switch vi.DBType {
+								case "gravdb":
+									invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+								case "boltdb":
+									invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+								}
+								i := 0
+								for _, v := range invokedetails {
+									sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+									if sc_action == "1" {
+										i++
+										scinstalls = append(scinstalls, v)
+									}
+								}
+
+								if i == 0 {
+									logger.Printf("No sc_action of '1' for %v", k)
+								}
+							}
+
+							if len(scinstalls) > 0 {
+								// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+								sort.SliceStable(scinstalls, func(i, j int) bool {
+									return scinstalls[i].Height < scinstalls[j].Height
+								})
+
+								// +1 for hardcoded name service SC
+								l := 0
+								for _, v := range scinstalls {
+									if v.Height <= int64(sh) {
+										logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
+										l++
+									}
+								}
+								logger.Printf("Total SCs installed: %v", l+1)
+							}
+						}
+					} else {
+						logger.Errorf("Could not parse '%v' into an int for height", line_parts[1])
+					}
 				} else {
-					logger.Printf("listscinvoke_bysigner needs a single scid and partialsigner string as argument")
+					logger.Printf("listsc_byheight needs either no arguments or a single height argument")
 				}
 			}
 		case command == "listsc_balances":
@@ -1364,11 +1528,12 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
 	io.WriteString(w, "\t\033[1mlistsc_hardcoded\033[0m\t\tLists all hardcoded scids\n")
 	io.WriteString(w, "\t\033[1mlistsc_code\033[0m\t\tLists SCID code, listsc_code <scid>\n")
+	io.WriteString(w, "\t\033[1mlistsc_codematch\033[0m\t\tLists SCIDs that match a given search string, listsc_codematch <Test Search String>\n")
 	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
 	//io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byscid\033[0m\tList a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed, listsc_byheight\n")
+	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byentrypoint\033[0m\tLists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize or InitializePrivate() or to a specific SC is defined, listsc_byinitialize || listsc_byinitialize <scid>\n")
