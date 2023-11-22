@@ -627,9 +627,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
 					}
 					var count int64
+					var scinstalls []*structures.SCTXParse
 					for k, v := range sclist {
 						if v == line_parts[1] {
-							logger.Printf("SCID: %v ; Owner: %v", k, v)
 							var invokedetails []*structures.SCTXParse
 							switch vi.DBType {
 							case "gravdb":
@@ -637,11 +637,33 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							case "boltdb":
 								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
 							}
-							for _, invoke := range invokedetails {
-								logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
+							i := 0
+							for _, v := range invokedetails {
+								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+								if sc_action == "1" {
+									i++
+									scinstalls = append(scinstalls, v)
+								}
 							}
-							count++
+
+							if i == 0 {
+								logger.Printf("No sc_action of '1' for %v", k)
+							} else {
+								count++
+							}
 						}
+					}
+
+					if len(scinstalls) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls, func(i, j int) bool {
+							return scinstalls[i].Height < scinstalls[j].Height
+						})
+
+						for _, v := range scinstalls {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
+						}
+						logger.Printf("Total SCs installed: %v", len(scinstalls))
 					}
 
 					if count == 0 {
