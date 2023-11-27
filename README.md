@@ -100,11 +100,11 @@ commands:
 	listsc_codematch		Lists SCIDs that match a given search string, listsc_codematch <Test Search String>
 	listsc_variables		Lists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>
 	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress>
-	listsc_byscid	List a scid/owner pair by scid and optionally at a specified height and higher, listsc_byscid <scid> <minheight>
 	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>
 	listsc_balances	Lists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>
-	listsc_byentrypoint	Lists sc invokes by entrypoint, listsc_byentrypoint <scid> <entrypoint>
-	listsc_byinitialize	Lists all calls to SCs that attempted to run Initialize or InitializePrivate() or to a specific SC is defined, listsc_byinitialize || listsc_byinitialize <scid>
+	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight>
+	listscinvoke_byentrypoint	Lists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint>
+	listscinvoke_byinitialize	Lists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid>
 	listscinvoke_bysigner	Lists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>
 	listscidkey_byvaluestored	List keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>
 	listscidkey_byvaluelive	List keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>
