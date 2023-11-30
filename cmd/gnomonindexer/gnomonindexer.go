@@ -1427,6 +1427,80 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("getscidlist_byaddr needs 1 values: single address to match as arguments")
 			}
+		case command == "diffscid_code":
+			// Could be re-used/modified to be a diff on any string-based store
+
+			// TODO: Break down diff by the Function to which differences reside within
+			if len(line_parts) == 4 && len(line_parts[1]) == 64 {
+				intStart, err := strconv.Atoi(line_parts[2])
+				if err != nil {
+					logger.Printf("Start Height argument is not a proper int")
+				} else {
+					intEnd, err2 := strconv.Atoi(line_parts[3])
+					if err2 != nil {
+						logger.Printf("End Height argument is not a proper int")
+					} else {
+						for ki, vi := range g.Indexers {
+							logger.Printf(" - Indexer '%v'", ki)
+
+							var valuesstringbykey []string
+							var beginCode []string
+							var endCode []string
+
+							switch vi.DBType {
+							case "gravdb":
+								owner := vi.GravDBBackend.GetOwner(line_parts[1])
+								if owner != "" {
+									valuesstringbykey, _ = vi.GravDBBackend.GetSCIDValuesByKey(line_parts[1], "C", int64(intStart), false)
+									if len(valuesstringbykey) > 0 {
+										beginCode = strings.Split(strings.ReplaceAll(valuesstringbykey[0], "\r\n", "\n"), "\n")
+									}
+
+									valuesstringbykey, _ = vi.GravDBBackend.GetSCIDValuesByKey(line_parts[1], "C", int64(intEnd), false)
+									if len(valuesstringbykey) > 0 {
+										endCode = strings.Split(strings.ReplaceAll(valuesstringbykey[0], "\r\n", "\n"), "\n")
+									}
+								}
+							case "boltdb":
+								owner := vi.BBSBackend.GetOwner(line_parts[1])
+								if owner != "" {
+									valuesstringbykey, _ = vi.BBSBackend.GetSCIDValuesByKey(line_parts[1], "C", int64(intStart), false)
+									if len(valuesstringbykey) > 0 {
+										beginCode = strings.Split(strings.ReplaceAll(valuesstringbykey[0], "\r\n", "\n"), "\n")
+									}
+
+									valuesstringbykey, _ = vi.BBSBackend.GetSCIDValuesByKey(line_parts[1], "C", int64(intEnd), false)
+									if len(valuesstringbykey) > 0 {
+										endCode = strings.Split(strings.ReplaceAll(valuesstringbykey[0], "\r\n", "\n"), "\n")
+									}
+								}
+							}
+
+							if len(beginCode) != 0 && len(endCode) != 0 {
+
+								before := difference(beginCode, endCode)
+								after := difference(endCode, beginCode)
+								if len(before) > 0 || len(after) > 0 {
+									logger.Printf("Code from height '%d' is different than height '%d'", intStart, intEnd)
+									if len(before) == len(after) {
+										for i := 0; i < len(after); i++ {
+											logger.Printf("Before: %s ; After: %s", before[i], after[i])
+										}
+									} else {
+										logger.Printf("Slices before/after compare are different lengths. Printing indepentently:")
+										logger.Printf("Before (what doesn't exist now): %v", before)
+										logger.Printf("After (what now exists): %v", after)
+									}
+								} else {
+									logger.Printf("Code from height '%d' is the same at height '%d'", intStart, intEnd)
+								}
+							}
+						}
+					}
+				}
+			} else {
+				logger.Printf("diffscid_code needs 3 values: scid, start height and end height")
+			}
 		case command == "pop":
 			switch len(line_parts) {
 			case 1:
@@ -1546,6 +1620,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
 	//io.WriteString(w, "\t\033[1mindex_txn\033[0m\tIndex a specific txid (alpha), addscid_toindex <scid>\n")
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
+	io.WriteString(w, "\t\033[1mdiffscid_code\033[0m\tRuns a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>\n")
 	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 	io.WriteString(w, "\t\033[1mgnomonsc\033[0m\t\tShow scid of gnomon index scs\n")
@@ -1553,6 +1628,21 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mbye\033[0m\t\tQuit the daemon\n")
 	io.WriteString(w, "\t\033[1mexit\033[0m\t\tQuit the daemon\n")
 	io.WriteString(w, "\t\033[1mquit\033[0m\t\tQuit the daemon\n")
+}
+
+// difference returns the elements in `a` that aren't in `b`.
+func difference(a, b []string) []string {
+	mb := make(map[string]struct{}, len(b))
+	for _, x := range b {
+		mb[x] = struct{}{}
+	}
+	var diff []string
+	for _, x := range a {
+		if _, found := mb[x]; !found {
+			diff = append(diff, x)
+		}
+	}
+	return diff
 }
 
 // Check if value exists within a string array/slice

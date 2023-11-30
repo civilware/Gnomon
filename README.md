@@ -113,6 +113,7 @@ commands:
 	validatesc	Validates a SC looking for a 'signature' k/v pair containing DERO signature validating the code matches the signature, validatesc <scid>
 	addscid_toindex	Add a SCID to index list/validation filter manually, addscid_toindex <scid>
 	getscidlist_byaddr	Gets list of scids that addr has interacted with, getscidlist_byaddr <addr>
+	diffscid_code	Runs a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>
 	pop	Rolls back lastindexheight, pop <100>
 	status		Show general information
 	gnomonsc		Show scid of gnomon index scs
