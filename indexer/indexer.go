@@ -1757,17 +1757,20 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								var scVars []*structures.SCIDVariable
 								var scCode string
 
+								// v2.0.2-alpha.6 - Removing this as it is no longer needed to be skipped due to the scidexclusion list being supported
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
-									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
-									return
-								} else {
-									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-									scVarsDiff = indexer.GravDBBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
+								/*
+									if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
+										logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
+										return
+									} else {
+								*/
+								// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+								scVarsDiff = indexer.GravDBBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
 
-									// Gets the SC variables (key/value) at a given topoheight
-									scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
-								}
+								// Gets the SC variables (key/value) at a given topoheight
+								scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
+								//}
 
 								for indexer.GravDBBackend.Writing == 1 {
 									if indexer.Closing {
@@ -1834,17 +1837,20 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 								var scVars []*structures.SCIDVariable
 								var scCode string
 
+								// v2.0.2-alpha.6 - Removing this as it is no longer needed to be skipped due to the scidexclusion list being supported
 								// If a hardcodedscid invoke + fastsync is enabled, do not log any new details. We will only retain within DB on-launch data.
-								if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
-									logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
-									return
-								} else {
-									// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
-									scVarsDiff = indexer.BBSBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
+								/*
+									if scidExist(structures.Hardcoded_SCIDS, bl_sctxs[i].Scid) && indexer.FastSyncConfig.Enabled {
+										logger.Debugf("[indexInvokes] Skipping invoke detail store of '%v' since fastsync is '%v'.", bl_sctxs[i].Scid, indexer.FastSyncConfig.Enabled)
+										return
+									} else {
+								*/
+								// Gets the SC variables (key/value) at a given topoheight -1 and then will compare differences to executed height and store the diffs
+								scVarsDiff = indexer.BBSBackend.GetAllSCIDVariableDetails(bl_sctxs[i].Scid)
 
-									// Gets the SC variables (key/value) at a given topoheight
-									scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
-								}
+								// Gets the SC variables (key/value) at a given topoheight
+								scVars, scCode, _, _ = indexer.RPC.GetSCVariables(bl_sctxs[i].Scid, bl_txns.Topoheight, nil, nil, nil, false)
+								//}
 
 								for indexer.BBSBackend.Writing == 1 {
 									if indexer.Closing {
