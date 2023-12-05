@@ -19,6 +19,7 @@ import (
 	"github.com/civilware/Gnomon/mbllookup"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
+	"github.com/deroproject/derohe/globals"
 
 	"github.com/docopt/docopt-go"
 
@@ -1425,6 +1426,60 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("getscidlist_byaddr needs 1 values: single address to match as arguments")
 			}
+		case command == "countinvoke_burnvalue":
+			// Takes same inputs and filters as listscinvoke_byscid
+			// Example: countinvoke_burnvalue 8289c6109f41cbe1f6d5f27a419db537bf3bf30a25eff285241a36e1ae3e48a4
+			if len(line_parts) >= 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					var count int64
+					for k, v := range sclist {
+						if k == line_parts[1] {
+							logger.Printf("SCID: %v ; Owner: %v", k, v)
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
+
+							// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+							filteredResults := vi.PipeFilter(line_parts, invokedetails)
+
+							bvcalc := make(map[string]uint64)
+
+							for _, invoke := range filteredResults {
+								bv := invoke.Payloads[0].BurnValue
+								if !(bv > 1) && !invoke.Payloads[0].SCID.IsZero() {
+									continue
+								} else {
+									bvcalc[invoke.Payloads[0].SCID.String()] += bv
+								}
+							}
+
+							for k, v := range bvcalc {
+								logger.Printf("SCID '%s' - %s", k, globals.FormatMoney(v))
+							}
+
+							count++
+						}
+					}
+
+					if count == 0 {
+						logger.Printf("No SCIDs installed matching %v", line_parts[1])
+					}
+				}
+			} else {
+				logger.Printf("listsc_byscid needs a single scid as argument")
+			}
 		case command == "diffscid_code":
 			// Could be re-used/modified to be a diff on any string-based store
 
@@ -1606,7 +1661,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || listscinvoke_byscid <scid> | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_byentrypoint\033[0m\tLists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>\n")
@@ -1618,6 +1673,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
 	//io.WriteString(w, "\t\033[1mindex_txn\033[0m\tIndex a specific txid (alpha), addscid_toindex <scid>\n")
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
+	io.WriteString(w, "\t\033[1mcountinvoke_burnvalue\033[0m\tLists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || countinvoke_burnvalue <scid> | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mdiffscid_code\033[0m\tRuns a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>\n")
 	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")

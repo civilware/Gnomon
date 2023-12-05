@@ -102,7 +102,7 @@ commands:
 	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress>
 	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>
 	listsc_balances	Lists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>
-	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight>
+	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || listscinvoke_byscid <scid> | grep <stringmatch>
 	listscinvoke_byentrypoint	Lists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint>
 	listscinvoke_byinitialize	Lists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid>
 	listscinvoke_bysigner	Lists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>
@@ -113,6 +113,7 @@ commands:
 	validatesc	Validates a SC looking for a 'signature' k/v pair containing DERO signature validating the code matches the signature, validatesc <scid>
 	addscid_toindex	Add a SCID to index list/validation filter manually, addscid_toindex <scid>
 	getscidlist_byaddr	Gets list of scids that addr has interacted with, getscidlist_byaddr <addr>
+	countinvoke_burnvalue	Lists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || countinvoke_burnvalue <scid> | grep <stringmatch>
 	diffscid_code	Runs a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>
 	pop	Rolls back lastindexheight, pop <100>
 	status		Show general information
