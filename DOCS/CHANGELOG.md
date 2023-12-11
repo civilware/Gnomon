@@ -1,5 +1,12 @@
 ## CHANGELOG
 
+###2.0.3-alpha.1
+
+* Fastsync configuration moved to a structure to better support future changes and customizations.
+* GnomonIndexer CLI Updates
+    * listsc_codematch, diffscid_code, countinvoke_burnvalue added
+    * Added pipe filtering in new filter.go current and future support to be used within cli commands e.g. '| grep dReams' or '| exclude dReams'
+
 ###2.0.2-alpha.1
 
 * Indexer 'Status' property added that can be referenced for an easy state check for connected packages, dApps etc.

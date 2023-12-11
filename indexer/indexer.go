@@ -77,8 +77,17 @@ var Connected bool = false
 // local logger
 var logger *logrus.Entry
 
-func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fastsync bool, skipfsrecheck bool, sfscidexclusion []string) *Indexer {
+func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.BboltStore, dbtype string, search_filter []string, last_indexedheight int64, endpoint string, runmode string, mbllookup bool, closeondisconnect bool, fsc *structures.FastSyncConfig, sfscidexclusion []string) *Indexer {
 	logger = structures.Logger.WithFields(logrus.Fields{})
+
+	if fsc == nil {
+		fsc = &structures.FastSyncConfig{
+			Enabled:       false,
+			SkipFSRecheck: false,
+			ForceFastSync: false,
+			NoCode:        false,
+		}
+	}
 
 	return &Indexer{
 		LastIndexedHeight: last_indexedheight,
@@ -92,7 +101,7 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.Bb
 		RunMode:           runmode,
 		MBLLookup:         mbllookup,
 		CloseOnDisconnect: closeondisconnect,
-		FastSyncConfig:    &structures.FastSyncConfig{Enabled: fastsync, SkipFSRecheck: skipfsrecheck},
+		FastSyncConfig:    fsc,
 	}
 }
 
@@ -148,7 +157,8 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	}
 
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
-	if storedindex == 0 && indexer.FastSyncConfig.Enabled {
+	// If forcefastsync is used and lastindexheight is structures.FORCE_FASTSYNC_DIFF away then re-fastsync and catchup to chain height
+	if (storedindex == 0 && indexer.FastSyncConfig.Enabled) || (indexer.FastSyncConfig.ForceFastSync && indexer.FastSyncConfig.Enabled && indexer.ChainHeight-storedindex > structures.FORCE_FASTSYNC_DIFF) {
 		indexer.Status = "fastsyncing"
 		logger.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
 		storedindex = indexer.ChainHeight
@@ -803,6 +813,24 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 							}
 						}
 					}
+				} else if !indexer.FastSyncConfig.NoCode {
+					_, scCode, _, _ = indexer.RPC.GetSCVariables(scid, indexer.ChainHeight, nil, nil, nil, true)
+
+					// If we can get the SC and searchfilter is "" (get all), contains is true. Otherwise evaluate code against searchfilter
+					if len(indexer.SearchFilter) == 0 {
+						contains = true
+					} else {
+						// Ensure scCode is not blank (e.g. an invalid scid)
+						if scCode != "" {
+							for _, sfv := range indexer.SearchFilter {
+								contains = strings.Contains(scCode, sfv)
+								if contains {
+									// Break b/c we want to ensure contains remains true. Only care if it matches at least 1 case
+									break
+								}
+							}
+						}
+					}
 				}
 
 				scilock.Lock()
@@ -817,7 +845,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	for _, v := range scidstoindexstage {
 		if v.contains || varstoreonly {
 			// By returning valid variables of a given Scid (GetSC --> parse vars), we can conclude it is a valid SCID. Otherwise, skip adding to validated scids
-			if len(v.scVars) > 0 {
+			if len(v.scVars) > 0 || skipfsrecheck {
 				indexer.Lock()
 				indexer.ValidatedSCs = append(indexer.ValidatedSCs, v.scid)
 				indexer.Unlock()

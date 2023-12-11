@@ -223,7 +223,12 @@ mbl := false
 closeondisconnect := false
 
 // fastsync - Syncs against gnomon scid for scids and compares against search_filter, starts you at current topoheight
-fastsync := false
+fsc = &structures.FastSyncConfig{
+  Enabled:       false,    // fastsyncs SC index from gnomon sc. If no previous lastindexheight then fastsync will start syncing from chain height. Otherwise will continue from lastindexheight as well as pull from gnomonsc, unless forcefastsync is also defined.
+  SkipFSRecheck: false,    // skips re-validation efforts on index data when fastsync is enabled
+  ForceFastSync: false,    // forces fastsync and stored index catchup when last stored blockheight is > structures.FORCE_FASTSYNC_DIFF from chain height
+  NoCode:        false,    // defines whether to index sc code or not when skipfsrecheck is utilized
+}
 
 // sfscidexclusion - A defined string array of SCIDs to exclude index operations on. This would primarily be used to skip over say the gnomonsc indexes (can also be leveraged with CLI gnomonindexer via --skip-gnomonsc-index) or any other specific SCIDs that may match a search_filter but you don't want to log their indexing operations.
 var sfscidexclusion []string
@@ -233,7 +238,7 @@ sfscidexclusions = append(sfscidexclusion, structures.MAINNET_GNOMON_SCID)
 indexer.InitLog(arguments, os.Stdout)
 
 // Indexer
-defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, dbtype, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fastsync, sfscidexclusion)
+defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, dbtype, search_filter, last_indexedheight, daemon_endpoint, runmode, mbl, closeondisconnect, fsc, sfscidexclusion)
 ```
 
 ### Reading From DB(s)

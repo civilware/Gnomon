@@ -58,6 +58,8 @@ Options:
   --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
   --skipfsrecheck     True/false value (only relevant when --fastsync is used) to define if SC validity should be re-checked from data coming via Gnomon SC index or not.
+  --forcefastsync     True/false value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than 100 blocks.
+  --nocode     True/false value (only relevant when --fastsync and --skipfsrecheck are used) to index code from the fastsync index if skipfsrecheck is defined.
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
@@ -221,11 +223,19 @@ func main() {
 		fastsync = true
 	}
 
-	// If fastsync, define whether or not we are skipping re-validation on the scids from gnomon index sc
+	// If fastsync, define addtl fastsync config options
 	var skipfsrecheck bool
+	var forcefastsync bool
+	var nocode bool
 	if fastsync {
 		if arguments["--skipfsrecheck"] != nil && arguments["--skipfsrecheck"].(bool) == true {
 			skipfsrecheck = true
+		}
+		if arguments["--forcefastsync"] != nil && arguments["--forcefastsync"].(bool) == true {
+			forcefastsync = true
+		}
+		if arguments["--nocode"] != nil && arguments["--nocode"].(bool) == true {
+			nocode = true
 		}
 	}
 
@@ -323,7 +333,13 @@ func main() {
 	go apis.Start()
 
 	// Start default indexer based on search_filter params
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fastsync, skipfsrecheck, sf_scid_exclusions)
+	fsc := &structures.FastSyncConfig{
+		Enabled:       fastsync,
+		SkipFSRecheck: skipfsrecheck,
+		ForceFastSync: forcefastsync,
+		NoCode:        nocode,
+	}
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fsc, sf_scid_exclusions)
 
 	switch Gnomon.RunMode {
 	case "daemon":
