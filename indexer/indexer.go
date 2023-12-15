@@ -82,11 +82,14 @@ func NewIndexer(Graviton_backend *storage.GravitonStore, Bbs_backend *storage.Bb
 
 	if fsc == nil {
 		fsc = &structures.FastSyncConfig{
-			Enabled:       false,
-			SkipFSRecheck: false,
-			ForceFastSync: false,
-			NoCode:        false,
+			Enabled:           false,
+			SkipFSRecheck:     false,
+			ForceFastSync:     false,
+			ForceFastSyncDiff: structures.FORCE_FASTSYNC_DIFF,
+			NoCode:            false,
 		}
+	} else if fsc.ForceFastSyncDiff < 1 {
+		fsc.ForceFastSyncDiff = structures.FORCE_FASTSYNC_DIFF
 	}
 
 	return &Indexer{
@@ -142,6 +145,10 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 		break
 	}
 
+	if indexer.FastSyncConfig.Enabled {
+		logger.Printf("[StartDaemonMode] Fastsync Configuration: %v", indexer.FastSyncConfig)
+	}
+
 	var storedindex int64
 	switch indexer.DBType {
 	case "gravdb":
@@ -157,8 +164,8 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	}
 
 	// If storedindex returns 0, first opening, and fastsync is enabled set index to current chain height
-	// If forcefastsync is used and lastindexheight is structures.FORCE_FASTSYNC_DIFF away then re-fastsync and catchup to chain height
-	if (storedindex == 0 && indexer.FastSyncConfig.Enabled) || (indexer.FastSyncConfig.ForceFastSync && indexer.FastSyncConfig.Enabled && indexer.ChainHeight-storedindex > structures.FORCE_FASTSYNC_DIFF) {
+	// If forcefastsync is used and lastindexheight is indexer.FastSyncConfig.ForceFastSyncDiff away then re-fastsync and catchup to chain height
+	if (storedindex == 0 && indexer.FastSyncConfig.Enabled) || (indexer.FastSyncConfig.ForceFastSync && indexer.FastSyncConfig.Enabled && indexer.ChainHeight-storedindex > indexer.FastSyncConfig.ForceFastSyncDiff) {
 		indexer.Status = "fastsyncing"
 		logger.Printf("[StartDaemonMode] Fastsync initiated, setting to chainheight (%v)", indexer.ChainHeight)
 		storedindex = indexer.ChainHeight

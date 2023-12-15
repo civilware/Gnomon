@@ -63,10 +63,11 @@ type SCIDVariable struct {
 }
 
 type FastSyncConfig struct {
-	Enabled       bool
-	SkipFSRecheck bool
-	ForceFastSync bool
-	NoCode        bool
+	Enabled           bool
+	SkipFSRecheck     bool
+	ForceFastSync     bool
+	ForceFastSyncDiff int64
+	NoCode            bool
 }
 
 type FastSyncImport struct {

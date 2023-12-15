@@ -58,7 +58,8 @@ Options:
   --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
   --skipfsrecheck     True/false value (only relevant when --fastsync is used) to define if SC validity should be re-checked from data coming via Gnomon SC index or not.
-  --forcefastsync     True/false value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than 100 blocks.
+  --forcefastsync     True/false value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than 100 blocks or n blocks represented by -forcefastsyncdiff.
+  --forcefastsyncdiff=<100>     Int64 value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than supplied number of blocks.
   --nocode     True/false value (only relevant when --fastsync and --skipfsrecheck are used) to index code from the fastsync index if skipfsrecheck is defined.
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
@@ -227,6 +228,7 @@ func main() {
 	var skipfsrecheck bool
 	var forcefastsync bool
 	var nocode bool
+	forcefastsyncdiff := structures.FORCE_FASTSYNC_DIFF
 	if fastsync {
 		if arguments["--skipfsrecheck"] != nil && arguments["--skipfsrecheck"].(bool) == true {
 			skipfsrecheck = true
@@ -236,6 +238,13 @@ func main() {
 		}
 		if arguments["--nocode"] != nil && arguments["--nocode"].(bool) == true {
 			nocode = true
+		}
+		if arguments["--forcefastsyncdiff"] != nil {
+			ffsdatoi, err := strconv.Atoi(arguments["--forcefastsyncdiff"].(string))
+			if err != nil {
+				logger.Fatalf("[Main] ERR converting '%v' to int for --forcefastsyncdiff.", arguments["--forcefastsyncdiff"].(string))
+			}
+			forcefastsyncdiff = int64(ffsdatoi)
 		}
 	}
 
@@ -334,10 +343,11 @@ func main() {
 
 	// Start default indexer based on search_filter params
 	fsc := &structures.FastSyncConfig{
-		Enabled:       fastsync,
-		SkipFSRecheck: skipfsrecheck,
-		ForceFastSync: forcefastsync,
-		NoCode:        nocode,
+		Enabled:           fastsync,
+		SkipFSRecheck:     skipfsrecheck,
+		ForceFastSync:     forcefastsync,
+		ForceFastSyncDiff: forcefastsyncdiff,
+		NoCode:            nocode,
 	}
 	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fsc, sf_scid_exclusions)
 

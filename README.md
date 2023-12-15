@@ -226,7 +226,8 @@ closeondisconnect := false
 fsc = &structures.FastSyncConfig{
   Enabled:       false,    // fastsyncs SC index from gnomon sc. If no previous lastindexheight then fastsync will start syncing from chain height. Otherwise will continue from lastindexheight as well as pull from gnomonsc, unless forcefastsync is also defined.
   SkipFSRecheck: false,    // skips re-validation efforts on index data when fastsync is enabled
-  ForceFastSync: false,    // forces fastsync and stored index catchup when last stored blockheight is > structures.FORCE_FASTSYNC_DIFF from chain height
+  ForceFastSync: false,    // forces fastsync and stored index catchup when last stored blockheight is > ForceFastSyncDiff value (default 100) from chain height
+  ForceFastSyncDiff: 100,  // // Force FastSync difference object. When utilized, defines how many blocks difference between stored and chain height to determine if fastsync is forced
   NoCode:        false,    // defines whether to index sc code or not when skipfsrecheck is utilized
 }
 
