@@ -1933,7 +1933,7 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 						//logger.Debugf("Tx %v does not match scinvoke call filter(s), but %v instead. This should not (currently) be added to DB.", bl_sctxs[i].Txid, bl_sctxs[i].Entrypoint)
 					}
 				} else {
-					logger.Debugf("SCID %v is not validated and thus we do not log SC interactions for this. Moving on.", bl_sctxs[i].Scid)
+					logger.Debugf("SCID %v is not validated and thus we do not log SC interactions for this. Moving on. TXID: %s", bl_sctxs[i].Scid, bl_sctxs[i].Txid)
 				}
 			}
 		}
