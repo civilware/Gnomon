@@ -753,7 +753,10 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_variables needs one value: single scid")
 			}
 		case command == "listsc_byowner":
-			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
+			if len(line_parts) >= 2 && len(line_parts[1]) == 66 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					sclist := make(map[string]string)
@@ -784,7 +787,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							}
 
 							if i == 0 {
-								logger.Printf("No sc_action of '1' for %v", k)
+								logger.Debugf("No sc_action of '1' for %v", k)
 							} else {
 								count++
 							}
@@ -797,10 +800,14 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							return scinstalls[i].Height < scinstalls[j].Height
 						})
 
-						for _, v := range scinstalls {
-							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
 						}
-						logger.Printf("Total SCs installed: %v", len(scinstalls))
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults))
 					}
 
 					if count == 0 {
@@ -811,8 +818,60 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_byowner needs a single owner address as argument")
 			}
 		case command == "listsc_byheight":
-			{
-				if len(line_parts) == 1 {
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
+			if len(line_parts) == 1 || line_parts[1] == "|" {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					var scinstalls []*structures.SCTXParse
+					var sclist map[string]string
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					for k, _ := range sclist {
+						var invokedetails []*structures.SCTXParse
+						switch vi.DBType {
+						case "gravdb":
+							invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+						case "boltdb":
+							invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+						}
+						i := 0
+						for _, v := range invokedetails {
+							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+							if sc_action == "1" {
+								i++
+								scinstalls = append(scinstalls, v)
+							}
+						}
+
+						if i == 0 {
+							logger.Debugf("No sc_action of '1' for %v", k)
+						}
+					}
+
+					if len(scinstalls) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls, func(i, j int) bool {
+							return scinstalls[i].Height < scinstalls[j].Height
+						})
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+						}
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults)+len(structures.Hardcoded_SCIDS))
+					}
+				}
+			} else if len(line_parts) >= 2 {
+				if sh, err := strconv.Atoi(line_parts[1]); err == nil {
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
 						var scinstalls []*structures.SCTXParse
@@ -841,7 +900,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							}
 
 							if i == 0 {
-								logger.Printf("No sc_action of '1' for %v", k)
+								logger.Debugf("No sc_action of '1' for %v", k)
 							}
 						}
 
@@ -851,70 +910,26 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 								return scinstalls[i].Height < scinstalls[j].Height
 							})
 
-							// +1 for hardcoded name service SC
-							for _, v := range scinstalls {
-								logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
+							l := 0
+
+							// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+							filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
+
+							for _, invoke := range filteredResults {
+								if invoke.Height <= int64(sh) {
+									logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+									l++
+								}
 							}
-							logger.Printf("Total SCs installed: %v", len(scinstalls)+1)
+
+							logger.Printf("Total SCs installed: %v", l+len(structures.Hardcoded_SCIDS))
 						}
-					}
-				} else if len(line_parts) == 2 {
-					if sh, err := strconv.Atoi(line_parts[1]); err == nil {
-						for ki, vi := range g.Indexers {
-							logger.Printf("- Indexer '%v'", ki)
-							var scinstalls []*structures.SCTXParse
-							var sclist map[string]string
-							switch vi.DBType {
-							case "gravdb":
-								sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
-							case "boltdb":
-								sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
-							}
-							for k, _ := range sclist {
-								var invokedetails []*structures.SCTXParse
-								switch vi.DBType {
-								case "gravdb":
-									invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
-								case "boltdb":
-									invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
-								}
-								i := 0
-								for _, v := range invokedetails {
-									sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
-									if sc_action == "1" {
-										i++
-										scinstalls = append(scinstalls, v)
-									}
-								}
-
-								if i == 0 {
-									logger.Printf("No sc_action of '1' for %v", k)
-								}
-							}
-
-							if len(scinstalls) > 0 {
-								// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
-								sort.SliceStable(scinstalls, func(i, j int) bool {
-									return scinstalls[i].Height < scinstalls[j].Height
-								})
-
-								// +1 for hardcoded name service SC
-								l := 0
-								for _, v := range scinstalls {
-									if v.Height <= int64(sh) {
-										logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", v.Scid, v.Sender, v.Height)
-										l++
-									}
-								}
-								logger.Printf("Total SCs installed: %v", l+1)
-							}
-						}
-					} else {
-						logger.Errorf("Could not parse '%v' into an int for height", line_parts[1])
 					}
 				} else {
-					logger.Printf("listsc_byheight needs either no arguments or a single height argument")
+					logger.Errorf("Could not parse '%v' into an int for height", line_parts[1])
 				}
+			} else {
+				logger.Printf("listsc_byheight needs either no arguments or a single height argument")
 			}
 		case command == "listsc_balances":
 			if len(line_parts) == 1 {
@@ -934,12 +949,12 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						for kb, vb := range cbal {
 							if vb > 0 {
 								if pc == 0 {
-									fmt.Printf("%v:", k)
+									logger.Printf("%v:", k)
 								}
 								if kb == "0000000000000000000000000000000000000000000000000000000000000000" {
-									fmt.Printf("_DERO: %v\n", vb)
+									logger.Printf("_DERO: %v\n", vb)
 								} else {
-									fmt.Printf("_Asset: %v:%v\n", kb, vb)
+									logger.Printf("_Asset: %v:%v\n", kb, vb)
 								}
 								pc++
 							}
@@ -971,12 +986,12 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						for kb, vb := range cbal {
 							if vb > 0 {
 								if pc == 0 {
-									fmt.Printf("%v:\n", k)
+									logger.Printf("%v:\n", k)
 								}
 								if kb == "0000000000000000000000000000000000000000000000000000000000000000" {
-									fmt.Printf("_DERO: %v\n", vb)
+									logger.Printf("_DERO: %v\n", vb)
 								} else {
-									fmt.Printf("_Asset: %v:%v\n", kb, vb)
+									logger.Printf("_Asset: %v:%v\n", kb, vb)
 								}
 								pc++
 							}
@@ -992,6 +1007,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_byscid needs a single scid or no SCIDs as argument")
 			}
 		case command == "listscinvoke_byscid":
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
 			if len(line_parts) >= 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
@@ -1015,7 +1033,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							}
 
 							// Filter line inputs (if applicable) and return a trimmed list to print out to cli
-							filteredResults := vi.PipeFilter(line_parts, invokedetails)
+							filteredResults := vi.PipeFilter(filt_line_parts, invokedetails)
 
 							for _, invoke := range filteredResults {
 								logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
@@ -1033,7 +1051,10 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_byscid needs a single scid as argument")
 			}
 		case command == "listscinvoke_byentrypoint":
-			if len(line_parts) == 3 && len(line_parts[1]) == 64 {
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
+			if len(line_parts) >= 3 && len(line_parts[1]) == 64 && line_parts[2] != "|" {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					var indexbyentry []*structures.SCTXParse
@@ -1044,8 +1065,12 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(line_parts[1], line_parts[2])
 					}
 					var count int64
-					for _, v := range indexbyentry {
-						logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+
+					// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+					filteredResults := vi.PipeFilter(filt_line_parts, indexbyentry)
+
+					for _, invoke := range filteredResults {
+						logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 						count++
 					}
 
@@ -1057,7 +1082,10 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_byscid needs a single scid and entrypoint as argument")
 			}
 		case command == "listscinvoke_byinitialize":
-			if len(line_parts) == 1 { //&& len(line_parts[1]) == 64 {
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
+			if len(line_parts) == 1 || (len(line_parts) >= 1 && len(filt_line_parts) > 0 && line_parts[1] == "|") { //&& len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					var sclist map[string]string
@@ -1076,15 +1104,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
 						}
-						for _, v := range indexbyentry {
-							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, indexbyentry)
+
+						for _, invoke := range filteredResults {
+							sc_action := fmt.Sprintf("%v", invoke.Sc_args.Value("SC_ACTION", "U"))
 							// If action is 'installsc' we don't need to return results for this
 							if sc_action == "1" {
 								continue
 							}
-							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 							count++
 						}
+
 						var indexbyentry2 []*structures.SCTXParse
 						switch vi.DBType {
 						case "gravdb":
@@ -1092,13 +1125,17 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							indexbyentry2 = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
 						}
-						for _, v := range indexbyentry2 {
-							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults2 := vi.PipeFilter(filt_line_parts, indexbyentry2)
+
+						for _, invoke := range filteredResults2 {
+							sc_action := fmt.Sprintf("%v", invoke.Sc_args.Value("SC_ACTION", "U"))
 							// If action is 'installsc' we don't need to return results for this
 							if sc_action == "1" {
 								continue
 							}
-							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 							count2++
 						}
 					}
@@ -1107,7 +1144,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						logger.Printf("No SCIDs with initialize called.")
 					}
 				}
-			} else if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+			} else if len(line_parts) == 2 && len(line_parts[1]) == 64 || (len(filt_line_parts) > 0 && len(line_parts) >= 2 && len(line_parts[1]) == 64 && line_parts[2] == "|") {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
 					var sclist map[string]string
@@ -1129,15 +1166,20 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							indexbyentry = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "Initialize")
 						}
-						for _, v := range indexbyentry {
-							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, indexbyentry)
+
+						for _, invoke := range filteredResults {
+							sc_action := fmt.Sprintf("%v", invoke.Sc_args.Value("SC_ACTION", "U"))
 							// If action is 'installsc' we don't need to return results for this
 							if sc_action == "1" {
 								continue
 							}
-							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 							count++
 						}
+
 						var indexbyentry2 []*structures.SCTXParse
 						switch vi.DBType {
 						case "gravdb":
@@ -1145,13 +1187,17 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						case "boltdb":
 							indexbyentry2 = vi.BBSBackend.GetAllSCIDInvokeDetailsByEntrypoint(k, "InitializePrivate")
 						}
-						for _, v := range indexbyentry2 {
-							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults2 := vi.PipeFilter(filt_line_parts, indexbyentry2)
+
+						for _, invoke := range filteredResults2 {
+							sc_action := fmt.Sprintf("%v", invoke.Sc_args.Value("SC_ACTION", "U"))
 							// If action is 'installsc' we don't need to return results for this
 							if sc_action == "1" {
 								continue
 							}
-							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+							logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
 							count2++
 						}
 					}
@@ -1165,6 +1211,9 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			}
 		case command == "listscinvoke_bysigner":
 			{
+				// Split up line_parts and identify any common language filtering
+				filt_line_parts := indexer.SplitLineParts(line_parts)
+
 				if len(line_parts) >= 2 {
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
@@ -1189,10 +1238,16 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 								indexbypartialsigner = vi.BBSBackend.GetAllSCIDInvokeDetailsBySigner(k, line_parts[1])
 							}
 							if len(indexbypartialsigner) > 0 {
-								logger.Printf("SCID: %v ; Owner: %v", k, v)
-							}
-							for _, v := range indexbypartialsigner {
-								logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", v.Sender, v.Height, v.Sc_args, v.Payloads[0].BurnValue)
+								// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+								filteredResults := vi.PipeFilter(filt_line_parts, indexbypartialsigner)
+
+								if len(filteredResults) > 0 {
+									logger.Printf("SCID: %v ; Owner: %v", k, v)
+
+									for _, invoke := range filteredResults {
+										logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
+									}
+								}
 							}
 						}
 					}
@@ -1684,13 +1739,13 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_codematch\033[0m\t\tLists SCIDs that match a given search string, listsc_codematch <Test Search String>\n")
 	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
 	//io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress> | ... | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || listscinvoke_byscid <scid> | grep <stringmatch>\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_byentrypoint\033[0m\tLists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint>\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid>\n")
-	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || ... | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_byentrypoint\033[0m\tLists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint> || ... | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_byinitialize\033[0m\tLists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid> || ... | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mlistscinvoke_bysigner\033[0m\tLists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluestored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidkey_byvaluelive\033[0m\tList keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>\n")
 	io.WriteString(w, "\t\033[1mlistscidvalue_bykeystored\033[0m\tList keys in a SC that match a given value by pulling from gnomon database, listscidvalue_bykeystored <scid> <key>\n")
@@ -1699,7 +1754,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1maddscid_toindex\033[0m\tAdd a SCID to index list/validation filter manually, addscid_toindex <scid>\n")
 	//io.WriteString(w, "\t\033[1mindex_txn\033[0m\tIndex a specific txid (alpha), addscid_toindex <scid>\n")
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
-	io.WriteString(w, "\t\033[1mcountinvoke_burnvalue\033[0m\tLists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || countinvoke_burnvalue <scid> | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mcountinvoke_burnvalue\033[0m\tLists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mdiffscid_code\033[0m\tRuns a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>\n")
 	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")

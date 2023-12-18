@@ -78,6 +78,9 @@ Options:
   --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
   --skipfsrecheck     True/false value (only relevant when --fastsync is used) to define if SC validity should be re-checked from data coming via Gnomon SC index or not.
+  --forcefastsync     True/false value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than 100 blocks or n blocks represented by -forcefastsyncdiff.
+  --forcefastsyncdiff=<100>     Int64 value (only relevant when --fastsync is used) to force fastsync to occur if chainheight and stored index height differ greater than supplied number of blocks.
+  --nocode     True/false value (only relevant when --fastsync and --skipfsrecheck are used) to index code from the fastsync index if skipfsrecheck is defined.
   --dbtype=<boltdb>     Defines type of database. 'gravdb' or 'boltdb'. If gravdb, expect LARGE local storage if running in daemon mode until further optimized later. [--ramstore can only be valid with gravdb]. Defaults to boltdb.
   --ramstore     True/false value to define if the db [only if gravdb] will be used in RAM or on disk. Keep in mind on close, the RAM store will be non-persistent.
   --num-parallel-blocks=<5>     Defines the number of parallel blocks to index in daemonmode. While a lower limit of 1 is defined, there is no hardcoded upper limit. Be mindful the higher set, the greater the daemon load potentially (highly recommend local nodes if this is greater than 1-5)
@@ -99,13 +102,13 @@ commands:
 	listsc_code		Lists SCID code, listsc_code <scid>
 	listsc_codematch		Lists SCIDs that match a given search string, listsc_codematch <Test Search String>
 	listsc_variables		Lists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>
-	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress>
-	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight>
+	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress> | ... | grep <stringmatch>
+	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight> || ... | grep <stringmatch>
 	listsc_balances	Lists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>
-	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || listscinvoke_byscid <scid> | grep <stringmatch>
-	listscinvoke_byentrypoint	Lists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint>
-	listscinvoke_byinitialize	Lists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid>
-	listscinvoke_bysigner	Lists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid>
+	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || ... | grep <stringmatch>
+	listscinvoke_byentrypoint	Lists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint> || ... | grep <stringmatch>
+	listscinvoke_byinitialize	Lists all calls to SCs that attempted to run Initialize() or InitializePrivate() or to a specific SC is defined, listscinvoke_byinitialize || listscinvoke_byinitialize <scid> || ... | grep <stringmatch>
+	listscinvoke_bysigner	Lists all sc invokes that match a given signer or partial signer address and optionally by scid, listscinvoke_bysigner <signerstring> || listscinvoke_bysigner <signerstring> <scid> || ... | grep <stringmatch>
 	listscidkey_byvaluestored	List keys in a SC that match a given value by pulling from gnomon database, listscidkey_byvaluestored <scid> <value>
 	listscidkey_byvaluelive	List keys in a SC that match a given value by pulling from daemon, listscidkey_byvaluelive <scid> <value>
 	listscidvalue_bykeystored	List keys in a SC that match a given value by pulling from gnomon database, listscidvalue_bykeystored <scid> <key>
@@ -113,7 +116,7 @@ commands:
 	validatesc	Validates a SC looking for a 'signature' k/v pair containing DERO signature validating the code matches the signature, validatesc <scid>
 	addscid_toindex	Add a SCID to index list/validation filter manually, addscid_toindex <scid>
 	getscidlist_byaddr	Gets list of scids that addr has interacted with, getscidlist_byaddr <addr>
-	countinvoke_burnvalue	Lists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || countinvoke_burnvalue <scid> | grep <stringmatch>
+	countinvoke_burnvalue	Lists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || ... | grep <stringmatch>
 	diffscid_code	Runs a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>
 	pop	Rolls back lastindexheight, pop <100>
 	status		Show general information
