@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -2203,6 +2204,8 @@ func (indexer *Indexer) getWalletHeight() {
 func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 []uint64, keysstring []string, keysbytes [][]byte, codeonly bool) (variables []*structures.SCIDVariable, code string, balances map[string]uint64, err error) {
 	//balances = make(map[string]uint64)
 
+	isAlpha := regexp.MustCompile(`^[A-Za-z]+$`).MatchString
+
 	var getSCResults rpc.GetSC_Result
 	var getSCParams rpc.GetSC_Params
 	if codeonly {
@@ -2268,12 +2271,45 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 				addr := rpc.NewAddressFromKeys(p)
 				currVar.Value = addr.String()
 			} else {
-				currVar.Value = string(dstr)
+				// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
+				str := string(dstr)
+				if len(str) == crypto.HashLength {
+					var h crypto.Hash
+					copy(h[:crypto.HashLength], []byte(str)[:])
+
+					if len(h.String()) == 64 && !isAlpha(str) {
+						if !crypto.HashHexToHash(str).IsZero() {
+							currVar.Value = str
+						} else {
+							currVar.Value = h.String()
+						}
+					} else {
+						currVar.Value = str
+					}
+				} else {
+					currVar.Value = str
+				}
 			}
 		default:
 			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
 			str := fmt.Sprintf("%v", cval)
-			currVar.Value = str
+			// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
+			if len(str) == crypto.HashLength {
+				var h crypto.Hash
+				copy(h[:crypto.HashLength], []byte(str)[:])
+
+				if len(h.String()) == 64 && !isAlpha(str) {
+					if !crypto.HashHexToHash(str).IsZero() {
+						currVar.Value = str
+					} else {
+						currVar.Value = h.String()
+					}
+				} else {
+					currVar.Value = str
+				}
+			} else {
+				currVar.Value = str
+			}
 		}
 		variables = append(variables, currVar)
 	}
@@ -2291,7 +2327,24 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 				addr := rpc.NewAddressFromKeys(p)
 				currVar.Value = addr.String()
 			} else {
-				currVar.Value = string(decd)
+				// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
+				str := string(decd)
+				if len(str) == crypto.HashLength {
+					var h crypto.Hash
+					copy(h[:crypto.HashLength], []byte(str)[:])
+
+					if len(h.String()) == 64 && !isAlpha(str) {
+						if !crypto.HashHexToHash(str).IsZero() {
+							currVar.Value = str
+						} else {
+							currVar.Value = h.String()
+						}
+					} else {
+						currVar.Value = str
+					}
+				} else {
+					currVar.Value = str
+				}
 			}
 		case uint64:
 			currVar.Value = cval
@@ -2300,7 +2353,23 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 		default:
 			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
 			str := fmt.Sprintf("%v", cval)
-			currVar.Value = str
+			// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
+			if len(str) == crypto.HashLength {
+				var h crypto.Hash
+				copy(h[:crypto.HashLength], []byte(str)[:])
+
+				if len(h.String()) == 64 && !isAlpha(str) {
+					if !crypto.HashHexToHash(str).IsZero() {
+						currVar.Value = str
+					} else {
+						currVar.Value = h.String()
+					}
+				} else {
+					currVar.Value = str
+				}
+			} else {
+				currVar.Value = str
+			}
 		}
 		variables = append(variables, currVar)
 	}

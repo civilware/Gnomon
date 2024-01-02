@@ -438,12 +438,14 @@ func filterInput(r rune) (rune, bool) {
 
 func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Printf("[Main] Readline_loop err: %v", err)
-			err = fmt.Errorf("crashed")
-		}
-	}()
+	/*
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Printf("[Main] Readline_loop err: %v", err)
+				err = fmt.Errorf("crashed")
+			}
+		}()
+	*/
 
 	//restart_loop:
 	for {
@@ -478,17 +480,139 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case line == "version":
 			logger.Printf("Version: %v", structures.Version.String())
 		case command == "listsc":
-			for ki, vi := range g.Indexers {
-				logger.Printf("- Indexer '%v'", ki)
-				sclist := make(map[string]string)
-				switch vi.DBType {
-				case "gravdb":
-					sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
-				case "boltdb":
-					sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+			// Split up line_parts and identify any common language filtering
+			filt_line_parts := indexer.SplitLineParts(line_parts)
+
+			if len(line_parts) >= 2 && len(line_parts[1]) == 66 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					sclist := make(map[string]string)
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					var count int64
+					var scinstalls []*structures.SCTXParse
+					for k, v := range sclist {
+						if v == line_parts[1] {
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
+							i := 0
+							for _, v := range invokedetails {
+								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+								if sc_action == "1" {
+									i++
+									scinstalls = append(scinstalls, v)
+								}
+							}
+
+							if i == 0 {
+								logger.Debugf("No sc_action of '1' for %v", k)
+							} else {
+								count++
+							}
+						}
+					}
+
+					if len(scinstalls) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls, func(i, j int) bool {
+							return scinstalls[i].Height < scinstalls[j].Height
+						})
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+						}
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults))
+					}
+
+					if count == 0 {
+						logger.Printf("No SCIDs installed by %v", line_parts[1])
+					}
 				}
-				for k, v := range sclist {
-					logger.Printf("SCID: %v ; Owner: %v", k, v)
+			} else if len(line_parts) >= 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					sclist := make(map[string]string)
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+					var count int64
+					var scinstalls []*structures.SCTXParse
+					for k, _ := range sclist {
+						if k == line_parts[1] {
+							var invokedetails []*structures.SCTXParse
+							switch vi.DBType {
+							case "gravdb":
+								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
+							case "boltdb":
+								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
+							}
+							i := 0
+							for _, v := range invokedetails {
+								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
+								if sc_action == "1" {
+									i++
+									scinstalls = append(scinstalls, v)
+								}
+							}
+
+							if i == 0 {
+								logger.Debugf("No sc_action of '1' for %v", k)
+							} else {
+								count++
+							}
+						}
+					}
+
+					if len(scinstalls) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls, func(i, j int) bool {
+							return scinstalls[i].Height < scinstalls[j].Height
+						})
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+						}
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults))
+					}
+
+					if count == 0 {
+						logger.Printf("No SCIDs installed by %v", line_parts[1])
+					}
+				}
+			} else {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					sclist := make(map[string]string)
+					switch vi.DBType {
+					case "gravdb":
+						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
+					case "boltdb":
+						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
+					}
+
+					for k, v := range sclist {
+						logger.Printf("SCID: %v ; Owner: %v", k, v)
+					}
 				}
 			}
 		case command == "listsc_hardcoded":
@@ -751,71 +875,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 			default:
 				logger.Printf("listsc_variables needs one value: single scid")
-			}
-		case command == "listsc_byowner":
-			// Split up line_parts and identify any common language filtering
-			filt_line_parts := indexer.SplitLineParts(line_parts)
-
-			if len(line_parts) >= 2 && len(line_parts[1]) == 66 {
-				for ki, vi := range g.Indexers {
-					logger.Printf("- Indexer '%v'", ki)
-					sclist := make(map[string]string)
-					switch vi.DBType {
-					case "gravdb":
-						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
-					case "boltdb":
-						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
-					}
-					var count int64
-					var scinstalls []*structures.SCTXParse
-					for k, v := range sclist {
-						if v == line_parts[1] {
-							var invokedetails []*structures.SCTXParse
-							switch vi.DBType {
-							case "gravdb":
-								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
-							case "boltdb":
-								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
-							}
-							i := 0
-							for _, v := range invokedetails {
-								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
-								if sc_action == "1" {
-									i++
-									scinstalls = append(scinstalls, v)
-								}
-							}
-
-							if i == 0 {
-								logger.Debugf("No sc_action of '1' for %v", k)
-							} else {
-								count++
-							}
-						}
-					}
-
-					if len(scinstalls) > 0 {
-						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
-						sort.SliceStable(scinstalls, func(i, j int) bool {
-							return scinstalls[i].Height < scinstalls[j].Height
-						})
-
-						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
-						filteredResults := vi.PipeFilter(filt_line_parts, scinstalls)
-
-						for _, invoke := range filteredResults {
-							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
-						}
-
-						logger.Printf("Total SCs installed: %v", len(filteredResults))
-					}
-
-					if count == 0 {
-						logger.Printf("No SCIDs installed by %v", line_parts[1])
-					}
-				}
-			} else {
-				logger.Printf("listsc_byowner needs a single owner address as argument")
 			}
 		case command == "listsc_byheight":
 			// Split up line_parts and identify any common language filtering
@@ -1407,14 +1466,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					for _, sval := range valuesstringbykey {
 						logger.Printf("%v", sval)
-
-						// TODO: Returning human readable string representation of a txid crypto.Hash returned from above. Perhaps a way to implement this to be discoverable based on length?
-						/*
-							var h crypto.Hash
-							copy(h[:], []byte(sval)[:])
-							logger.Printf("%v", h.String())
-							logger.Printf("%v", []byte(sval))
-						*/
 					}
 					for _, uval := range valuesuint64bykey {
 						logger.Printf("%v", uval)
@@ -1733,13 +1784,11 @@ func usage(w io.Writer) {
 	io.WriteString(w, "commands:\n")
 	io.WriteString(w, "\t\033[1mhelp\033[0m\t\tthis help\n")
 	io.WriteString(w, "\t\033[1mversion\033[0m\t\tShow gnomon version\n")
-	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter\n")
+	io.WriteString(w, "\t\033[1mlistsc\033[0m\t\tLists all indexed scids that match original search filter and optionally filtered by owner or scid via input. listsc || listsc <owneraddress> || listsc <scid> | ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistsc_hardcoded\033[0m\t\tLists all hardcoded scids\n")
 	io.WriteString(w, "\t\033[1mlistsc_code\033[0m\t\tLists SCID code, listsc_code <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_codematch\033[0m\t\tLists SCIDs that match a given search string, listsc_codematch <Test Search String>\n")
 	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
-	//io.WriteString(w, "\t\033[1mnew_sf\033[0m\t\tStarts a new gnomon search (to be deprecated/modified), new_sf <searchfilterstring>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byowner\033[0m\tLists SCIDs by owner, listsc_byowner <owneraddress> | ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || ... | grep <stringmatch>\n")

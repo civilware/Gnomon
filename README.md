@@ -97,12 +97,11 @@ By typing ```help``` via the cli gnomonindexer you can print the below to utiliz
 commands:
 	help		this help
 	version		Show gnomon version
-	listsc		Lists all indexed scids that match original search filter
+	listsc		Lists all indexed scids that match original search filter and optionally filtered by owner or scid via input. listsc || listsc <owneraddress> || listsc <scid> | ... | grep <stringmatch>
 	listsc_hardcoded		Lists all hardcoded scids
 	listsc_code		Lists SCID code, listsc_code <scid>
 	listsc_codematch		Lists SCIDs that match a given search string, listsc_codematch <Test Search String>
 	listsc_variables		Lists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>
-	listsc_byowner	Lists SCIDs by owner, listsc_byowner <owneraddress> | ... | grep <stringmatch>
 	listsc_byheight	List all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight> || ... | grep <stringmatch>
 	listsc_balances	Lists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>
 	listscinvoke_byscid	Lists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || ... | grep <stringmatch>
