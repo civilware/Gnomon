@@ -3,6 +3,7 @@ module github.com/civilware/Gnomon
 go 1.18
 
 require (
+	github.com/blang/semver/v4 v4.0.0
 	github.com/chzyer/readline v1.5.1
 	github.com/creachadair/jrpc2 v0.43.0
 	github.com/deroproject/derohe v0.0.0-20230604143809-765b2db1f482
@@ -18,7 +19,6 @@ require (
 )
 
 require (
-	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/caarlos0/env/v6 v6.10.1 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

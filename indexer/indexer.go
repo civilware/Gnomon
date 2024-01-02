@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
-	"io"
 	"math/big"
 	"reflect"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,7 +15,6 @@ import (
 	"time"
 
 	"github.com/civilware/Gnomon/mbllookup"
-	"github.com/civilware/Gnomon/rwc"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
 
@@ -28,19 +25,8 @@ import (
 	"github.com/deroproject/derohe/transaction"
 	"github.com/deroproject/graviton"
 
-	"github.com/creachadair/jrpc2"
-	"github.com/creachadair/jrpc2/channel"
-	"github.com/gorilla/websocket"
-
 	"github.com/sirupsen/logrus"
-	prefixed "github.com/x-cray/logrus-prefixed-formatter"
 )
-
-type Client struct {
-	WS  *websocket.Conn
-	RPC *jrpc2.Client
-	sync.RWMutex
-}
 
 type SCIDToIndexStage struct {
 	scid     string
@@ -704,7 +690,7 @@ func (indexer *Indexer) StartDaemonMode(blockParallelNum int) {
 	}()
 }
 
-// Potential future item - may be removed as primary srevice of Gnomon is against daemon and not wallet due to security
+// Potential future item - may be removed as primary service of Gnomon is against daemon and not wallet due to security [unless future black box scenarios]
 func (indexer *Indexer) StartWalletMode(runType string) {
 	var err error
 
@@ -1021,48 +1007,6 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 		logger.Printf("[AddSCIDToIndex] Done - Committing RAM SCID sort to disk storage...")
 		logger.Printf("[AddSCIDToIndex] New stored disk: %v", len(indexer.BBSBackend.GetAllOwnersAndSCIDs()))
 	}
-
-	return err
-}
-
-func (client *Client) Connect(endpoint string) (err error) {
-	// Used to check if the endpoint has changed.. if so, then close WS to current and update WS
-	if client.WS != nil {
-		remAddr := client.WS.RemoteAddr()
-		var pingpong string
-		err2 := client.RPC.CallResult(context.Background(), "DERO.Ping", nil, &pingpong)
-		if strings.Contains(remAddr.String(), endpoint) && err2 == nil {
-			// Endpoint is the same, continue on
-			return
-		} else {
-			// Remote addr (current ws connection endpoint) does not match indexer endpoint - re-connecting
-			client.Lock()
-			defer client.Unlock()
-			client.WS.Close()
-		}
-	}
-
-	client.WS, _, err = websocket.DefaultDialer.Dial("ws://"+endpoint+"/ws", nil)
-
-	// notify user of any state change
-	// if daemon connection breaks or comes live again
-	if err == nil {
-		if !Connected {
-			logger.Printf("[Connect] Connection to RPC server successful - ws://%s/ws", endpoint)
-			Connected = true
-		}
-	} else {
-		logger.Errorf("[Connect] ERROR connecting to endpoint %v", err)
-
-		if Connected {
-			logger.Errorf("[Connect] ERROR - Connection to RPC server Failed - ws://%s/ws", endpoint)
-		}
-		Connected = false
-		return err
-	}
-
-	input_output := rwc.New(client.WS)
-	client.RPC = jrpc2.NewClient(channel.RawJSON(input_output, input_output), nil)
 
 	return err
 }
@@ -1945,83 +1889,6 @@ func (indexer *Indexer) indexInvokes(bl_sctxs []structures.SCTXParse, bl_txns *s
 	return nil
 }
 
-// Check if value exists within a string array/slice
-func scidExist(s []string, str string) bool {
-	for _, v := range s {
-		if v == str {
-			return true
-		}
-	}
-
-	return false
-}
-
-// DERO.GetTxPool rpc call for returning current mempool txns
-func (client *Client) GetTxPool() (txlist []string, err error) {
-	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
-	var reconnect_count int
-	for {
-		var err error
-
-		var io rpc.GetTxPool_Result
-
-		if err = client.RPC.CallResult(context.Background(), "DERO.GetTxPool", nil, &io); err != nil {
-			if reconnect_count >= 5 {
-				logger.Errorf("[getTxPool] GetTxPool failed: %v . (%v / 5 times)", err, reconnect_count)
-				break
-			}
-			time.Sleep(1 * time.Second)
-
-			reconnect_count++
-
-			continue
-		}
-
-		txlist = io.Tx_list
-		break
-	}
-
-	return
-}
-
-// DERO.GetBlockHeaderByTopoHeight rpc call for returning block hash at a particular topoheight
-func (client *Client) getBlockHash(height uint64) (hash string, err error) {
-	//logger.Debugf("[getBlockHash] Attempting to get block details at topoheight %v", height)
-	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
-	var reconnect_count int
-	for {
-		var err error
-
-		var io rpc.GetBlockHeaderByHeight_Result
-		var ip = rpc.GetBlockHeaderByTopoHeight_Params{TopoHeight: height}
-
-		if err = client.RPC.CallResult(context.Background(), "DERO.GetBlockHeaderByTopoHeight", ip, &io); err != nil {
-			logger.Debugf("[getBlockHash] %v - GetBlockHeaderByTopoHeight failed: %v . Trying again (%v / 5)", height, err, reconnect_count)
-			//return hash, fmt.Errorf("GetBlockHeaderByTopoHeight failed: %v", err)
-
-			// TODO: Perhaps just a .Closing = true call here and then gnomonserver can be polling for any indexers with .Closing then close the rest cleanly. If packaged, then just have to handle themselves w/ .Close()
-			if reconnect_count >= 5 {
-				logger.Errorf("[getBlockHash] %v - GetBlockHeaderByTopoHeight failed: %v . (%v / 5 times)", height, err, reconnect_count)
-				break
-			}
-			time.Sleep(1 * time.Second)
-
-			reconnect_count++
-
-			continue
-		} else {
-			//logger.Debugf("[getBlockHash] Retrieved block header from topoheight %v", height)
-			//mainnet = !info.Testnet // inverse of testnet is mainnet
-			//logger.Debugf("%v", io)
-		}
-
-		hash = io.Block_Header.Hash
-		break
-	}
-
-	return hash, err
-}
-
 // Looped interval to probe DERO.GetInfo rpc call for updating chain topoheight. Also handles keeping connection to daemon via RPC.Connect() calls
 func (indexer *Indexer) getInfo() {
 	var reconnect_count int
@@ -2200,226 +2067,6 @@ func (indexer *Indexer) getWalletHeight() {
 	}
 }
 
-// Gets SC variable details
-func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 []uint64, keysstring []string, keysbytes [][]byte, codeonly bool) (variables []*structures.SCIDVariable, code string, balances map[string]uint64, err error) {
-	//balances = make(map[string]uint64)
-
-	isAlpha := regexp.MustCompile(`^[A-Za-z]+$`).MatchString
-
-	var getSCResults rpc.GetSC_Result
-	var getSCParams rpc.GetSC_Params
-	if codeonly {
-		getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight}
-	} else {
-		getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: true, TopoHeight: topoheight}
-	}
-	if client.WS == nil {
-		return
-	}
-
-	// TODO: Make this a consumable func with rpc calls and timeout / wait / retry logic for deduplication of code. Or use alternate method of checking [primary use case is remote nodes]
-	var reconnect_count int
-	for {
-		if err = client.RPC.CallResult(context.Background(), "DERO.GetSC", getSCParams, &getSCResults); err != nil {
-			// Catch for v139 daemons that reject >1024 var returns and we need to be specific (if defined, otherwise we'll err out after 5 tries)
-			if strings.Contains(err.Error(), "max 1024 variables can be returned") || strings.Contains(err.Error(), "namesc cannot request all variables") {
-				if keysuint64 != nil || keysstring != nil || keysbytes != nil {
-					getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight, KeysUint64: keysuint64, KeysString: keysstring, KeysBytes: keysbytes}
-				} else {
-					// Default to at least return code true and variables false if we run into max var can't be returned (derod v139)
-					getSCParams = rpc.GetSC_Params{SCID: scid, Code: true, Variables: false, TopoHeight: topoheight}
-				}
-			}
-
-			logger.Debugf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . Trying again (%v / 5)", scid, err, reconnect_count+1)
-			if reconnect_count >= 5 {
-				logger.Errorf("[GetSCVariables] ERROR - GetSCVariables failed for '%v': %v . (%v / 5 times)", scid, err, reconnect_count)
-				return variables, code, balances, err
-			}
-			time.Sleep(1 * time.Second)
-
-			reconnect_count++
-
-			continue
-		}
-
-		break
-	}
-
-	code = getSCResults.Code
-
-	for k, v := range getSCResults.VariableStringKeys {
-		currVar := &structures.SCIDVariable{}
-		// TODO: Do we need to store "C" through these means? If we don't , need to update the len(scVars) etc. calls to ensure that even a 0 count goes through, but perhaps validate off code/balances
-		/*
-			if k == "C" {
-				continue
-			}
-		*/
-		currVar.Key = k
-		switch cval := v.(type) {
-		case float64:
-			currVar.Value = uint64(cval)
-		case uint64:
-			currVar.Value = cval
-		case string:
-			// hex decode since all strings are hex encoded
-			dstr, _ := hex.DecodeString(cval)
-			p := new(crypto.Point)
-			if err := p.DecodeCompressed(dstr); err == nil {
-
-				addr := rpc.NewAddressFromKeys(p)
-				currVar.Value = addr.String()
-			} else {
-				// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
-				str := string(dstr)
-				if len(str) == crypto.HashLength {
-					var h crypto.Hash
-					copy(h[:crypto.HashLength], []byte(str)[:])
-
-					if len(h.String()) == 64 && !isAlpha(str) {
-						if !crypto.HashHexToHash(str).IsZero() {
-							currVar.Value = str
-						} else {
-							currVar.Value = h.String()
-						}
-					} else {
-						currVar.Value = str
-					}
-				} else {
-					currVar.Value = str
-				}
-			}
-		default:
-			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
-			str := fmt.Sprintf("%v", cval)
-			// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
-			if len(str) == crypto.HashLength {
-				var h crypto.Hash
-				copy(h[:crypto.HashLength], []byte(str)[:])
-
-				if len(h.String()) == 64 && !isAlpha(str) {
-					if !crypto.HashHexToHash(str).IsZero() {
-						currVar.Value = str
-					} else {
-						currVar.Value = h.String()
-					}
-				} else {
-					currVar.Value = str
-				}
-			} else {
-				currVar.Value = str
-			}
-		}
-		variables = append(variables, currVar)
-	}
-
-	for k, v := range getSCResults.VariableUint64Keys {
-		currVar := &structures.SCIDVariable{}
-		currVar.Key = k
-		switch cval := v.(type) {
-		case string:
-			// hex decode since all strings are hex encoded
-			decd, _ := hex.DecodeString(cval)
-			p := new(crypto.Point)
-			if err := p.DecodeCompressed(decd); err == nil {
-
-				addr := rpc.NewAddressFromKeys(p)
-				currVar.Value = addr.String()
-			} else {
-				// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
-				str := string(decd)
-				if len(str) == crypto.HashLength {
-					var h crypto.Hash
-					copy(h[:crypto.HashLength], []byte(str)[:])
-
-					if len(h.String()) == 64 && !isAlpha(str) {
-						if !crypto.HashHexToHash(str).IsZero() {
-							currVar.Value = str
-						} else {
-							currVar.Value = h.String()
-						}
-					} else {
-						currVar.Value = str
-					}
-				} else {
-					currVar.Value = str
-				}
-			}
-		case uint64:
-			currVar.Value = cval
-		case float64:
-			currVar.Value = uint64(cval)
-		default:
-			// non-string/uint64 (shouldn't be here actually since it's either uint64 or string conversion)
-			str := fmt.Sprintf("%v", cval)
-			// Check specific patterns which reflect STORE() operations of TXID(), SCID(), etc.
-			if len(str) == crypto.HashLength {
-				var h crypto.Hash
-				copy(h[:crypto.HashLength], []byte(str)[:])
-
-				if len(h.String()) == 64 && !isAlpha(str) {
-					if !crypto.HashHexToHash(str).IsZero() {
-						currVar.Value = str
-					} else {
-						currVar.Value = h.String()
-					}
-				} else {
-					currVar.Value = str
-				}
-			} else {
-				currVar.Value = str
-			}
-		}
-		variables = append(variables, currVar)
-	}
-
-	// Derod v139 workaround. Everything that returns normal should always have variables of count at least 1 for 'C', but even if not these should still loop on nil and not produce bad data.
-	// We loop for safety, however returns really should only ever satisfy 1 variable end of the day since 1 key matches to 1 value. But bruteforce it for workaround
-	if len(variables) == 0 {
-		for _, ku := range keysuint64 {
-			currVar := &structures.SCIDVariable{}
-			for _, v := range getSCResults.ValuesUint64 {
-				currVar.Key = ku
-				currVar.Value = v
-				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
-				if strings.Contains(v, "leaf not found") {
-					continue
-				}
-				variables = append(variables, currVar)
-			}
-		}
-		for _, ks := range keysstring {
-			currVar := &structures.SCIDVariable{}
-			for _, v := range getSCResults.ValuesString {
-				currVar.Key = ks
-				currVar.Value = v
-				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
-				if strings.Contains(v, "leaf not found") {
-					continue
-				}
-				variables = append(variables, currVar)
-			}
-		}
-		for _, kb := range keysbytes {
-			currVar := &structures.SCIDVariable{}
-			for _, v := range getSCResults.ValuesBytes {
-				currVar.Key = kb
-				currVar.Value = v
-				// TODO: Perhaps a more appropriate err match to the graviton codebase rather than just the 'leaf not found' string.
-				if strings.Contains(v, "leaf not found") {
-					continue
-				}
-				variables = append(variables, currVar)
-			}
-		}
-	}
-
-	balances = getSCResults.Balances
-
-	return variables, code, balances, err
-}
-
 // Gets SC variable keys at given topoheight who's value equates to a given interface{} (string/uint64)
 func (indexer *Indexer) GetSCIDKeysByValue(variables []*structures.SCIDVariable, scid string, val interface{}, height int64) (keysstring []string, keysuint64 []uint64, err error) {
 	// If variables were not provided, then fetch them.
@@ -2582,36 +2229,6 @@ func (indexer *Indexer) ConvertSCIDValues(variables []*structures.SCIDVariable) 
 	}
 
 	return valuesstring, valuesuint64
-}
-
-// Check if value exists within an interface array/slice
-func vExist(arr []interface{}, val interface{}) bool {
-	for _, v := range arr {
-		switch ca := v.(type) {
-		case uint64:
-			switch va := val.(type) {
-			case uint64:
-				if ca == va {
-					return true
-				}
-			default:
-				// Do nothing
-			}
-		case string:
-			switch va := val.(type) {
-			case string:
-				if ca == va {
-					return true
-				}
-			default:
-				// Do nothing
-			}
-		default:
-			// Do nothing
-		}
-	}
-
-	return false
 }
 
 // Compares k/v pairs of two array sets of *structures.SCIDVariable
@@ -3386,22 +3003,43 @@ func (ind *Indexer) Close() {
 	}
 }
 
-func InitLog(args map[string]interface{}, console io.Writer) {
-	loglevel_console := logrus.InfoLevel
-
-	if args["--debug"] != nil && args["--debug"].(bool) == true {
-		loglevel_console = logrus.DebugLevel
+// Check if value exists within a string array/slice
+func scidExist(s []string, str string) bool {
+	for _, v := range s {
+		if v == str {
+			return true
+		}
 	}
 
-	structures.Logger = logrus.Logger{
-		Out:   console,
-		Level: loglevel_console,
-		Formatter: &prefixed.TextFormatter{
-			ForceColors:     true,
-			DisableColors:   false,
-			TimestampFormat: "01/02/2006 15:04:05",
-			FullTimestamp:   true,
-			ForceFormatting: true,
-		},
+	return false
+}
+
+// Check if value exists within an interface array/slice
+func vExist(arr []interface{}, val interface{}) bool {
+	for _, v := range arr {
+		switch ca := v.(type) {
+		case uint64:
+			switch va := val.(type) {
+			case uint64:
+				if ca == va {
+					return true
+				}
+			default:
+				// Do nothing
+			}
+		case string:
+			switch va := val.(type) {
+			case string:
+				if ca == va {
+					return true
+				}
+			default:
+				// Do nothing
+			}
+		default:
+			// Do nothing
+		}
 	}
+
+	return false
 }

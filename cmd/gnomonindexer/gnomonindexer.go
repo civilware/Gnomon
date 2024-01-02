@@ -19,6 +19,7 @@ import (
 	"github.com/civilware/Gnomon/mbllookup"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
+	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/globals"
 
 	"github.com/docopt/docopt-go"
@@ -1516,29 +1517,27 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments")
 			}
-			/*
-				case command == "index_txn":
-					// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
-					if len(line_parts) == 2 && len(line_parts[1]) == 64 {
-						for ki, vi := range g.Indexers {
-							logger.Printf("- Indexer '%v'", ki)
-							scidstoadd := make(map[string]*structures.FastSyncImport)
-							scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-							//err = vi.AddSCIDToIndex(scidstoadd, false)
-							var blTxns *structures.BlockTxns
-							blTxns.Topoheight = 1352506
-							var h crypto.Hash
-							copy(h[:], []byte(line_parts[1])[:])
-							blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
-							vi.IndexTxn(blTxns, false)
-							if err != nil {
-								logger.Printf("Err - %v", err)
-							}
-						}
-					} else {
-						logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments")
+
+		case command == "inspecttxns_byheight":
+			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
+			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+
+					var blTxns *structures.BlockTxns
+					blTxns.Topoheight = 1352506
+					var h crypto.Hash
+					copy(h[:crypto.HashLength], []byte(line_parts[1])[:])
+					blTxns.Tx_hashes = append(blTxns.Tx_hashes, h)
+					vi.IndexTxn(blTxns, true)
+					if err != nil {
+						logger.Printf("Err - %v", err)
 					}
-			*/
+				}
+			} else {
+				logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments")
+			}
+
 		case command == "getscidlist_byaddr":
 			// TODO: Perhaps add indexer id to a param so you can add it to specific search_filter/indexer. Supported by a 'status' (tbd) command which returns details of each indexer
 			if len(line_parts) == 2 && len(line_parts[1]) == 66 {
