@@ -199,6 +199,7 @@ func (client *Client) GetSCVariables(scid string, topoheight int64, keysuint64 [
 		case string:
 			// hex decode since all strings are hex encoded
 			dstr, _ := hex.DecodeString(cval)
+			// Check if dstr is an address raw
 			p := new(crypto.Point)
 			if err := p.DecodeCompressed(dstr); err == nil {
 

@@ -494,7 +494,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					case "boltdb":
 						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
 					}
-					var count int64
+					var count int
 					var scinstalls []*structures.SCTXParse
 					for k, v := range sclist {
 						if v == line_parts[1] {
@@ -516,6 +516,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 							if i == 0 {
 								logger.Debugf("No sc_action of '1' for %v", k)
+								scinstalls = append(scinstalls, &structures.SCTXParse{Scid: k, Sender: v})
+								count++
 							} else {
 								count++
 							}
@@ -554,7 +556,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					}
 					var count int64
 					var scinstalls []*structures.SCTXParse
-					for k, _ := range sclist {
+					for k, v := range sclist {
 						if k == line_parts[1] {
 							var invokedetails []*structures.SCTXParse
 							switch vi.DBType {
@@ -574,6 +576,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 							if i == 0 {
 								logger.Debugf("No sc_action of '1' for %v", k)
+								scinstalls = append(scinstalls, &structures.SCTXParse{Scid: k, Sender: v})
+								count++
 							} else {
 								count++
 							}
@@ -820,10 +824,16 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					if len(vars) > 0 {
 						logger.Printf("SCID: %v ; Owner: %v", line_parts[1], owner)
 						for _, vvar := range vars {
-							if vvar.Key.(string) == "C" {
-								continue
+							switch vvar.Key.(type) {
+							case string:
+								if vvar.Key.(string) == "C" {
+									continue
+								}
+
+								logger.Printf("Key: %v ; Value: %v", vvar.Key, vvar.Value)
+							default:
+								logger.Printf("Key: %v ; Value: %v", vvar.Key, vvar.Value)
 							}
-							logger.Printf("Key: %v ; Value: %v", vvar.Key, vvar.Value)
 						}
 						i++
 						break
