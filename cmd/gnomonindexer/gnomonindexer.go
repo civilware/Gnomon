@@ -56,6 +56,7 @@ Options:
   --search-filter=<"Function InputStr(input String, varname String) Uint64">     Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
   --runmode=<daemon>     Defines the runmode of gnomon (daemon/wallet/asset). By default this is daemon mode which indexes directly from the chain. Wallet mode indexes from wallet tx history (use/store with caution).
   --enable-miniblock-lookup     True/false value to store all miniblocks and their respective details and miner addresses who found them. This currently REQUIRES a full node db in same directory
+  --store-integrators     True/false value to store integrator addresses for each block and keep track of how many blocks they've submitted
   --close-on-disconnect     True/false value to close out indexers in the event of daemon disconnect. Daemon will fail connections for 30 seconds and then close the indexer. This is for HA pairs or wanting services off on disconnect.
   --fastsync     True/false value to define loading at chain height and only keeping track of list of SCIDs and their respective up-to-date variable stores as it hits them. NOTE: You will not get all information and may rely on manual scid additions.
   --skipfsrecheck     True/false value (only relevant when --fastsync is used) to define if SC validity should be re-checked from data coming via Gnomon SC index or not.
@@ -205,6 +206,11 @@ func main() {
 	}
 	Gnomon.MBLLookup = mbl
 
+	var storeintegrators bool
+	if arguments["--store-integrators"] != nil && arguments["--store-integrators"].(bool) == true {
+		storeintegrators = true
+	}
+
 	numParallelBlocks := 1
 	if arguments["--num-parallel-blocks"] != nil {
 		numParallelBlocks, err = strconv.Atoi(arguments["--num-parallel-blocks"].(string))
@@ -350,7 +356,7 @@ func main() {
 		ForceFastSyncDiff: forcefastsyncdiff,
 		NoCode:            nocode,
 	}
-	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fsc, sf_scid_exclusions)
+	defaultIndexer := indexer.NewIndexer(Graviton_backend, Bbs_backend, Gnomon.DBType, search_filter, last_indexedheight, daemon_endpoint, Gnomon.RunMode, mbl, closeondisconnect, fsc, sf_scid_exclusions, storeintegrators)
 
 	switch Gnomon.RunMode {
 	case "daemon":
@@ -1695,6 +1701,19 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("diffscid_code needs 3 values: scid, start height and end height")
 			}
+		case command == "list_interactionaddrs":
+			for ki, vi := range g.Indexers {
+				logger.Printf("- Indexer '%v'", ki)
+				addrList := make(map[string]*structures.IATrack)
+				var interCounts *structures.IATrack
+				addrList, interCounts = vi.GetInteractionAddresses(&structures.InteractionAddrs_Params{Integrator: true, Installs: true, Invokes: true})
+
+				for k, v := range addrList {
+					logger.Printf("[%s] %d - %d - %d", k, v.Installs, v.Integrator, v.Invokes)
+				}
+
+				logger.Printf("%v addresses, %d total integrators and %d total sc install interactions and %d total sc invoke interactions", len(addrList), interCounts.Integrator, interCounts.Installs, interCounts.Invokes)
+			}
 		case command == "pop":
 			switch len(line_parts) {
 			case 1:
@@ -1814,6 +1833,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
 	io.WriteString(w, "\t\033[1mcountinvoke_burnvalue\033[0m\tLists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mdiffscid_code\033[0m\tRuns a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>\n")
+	io.WriteString(w, "\t\033[1mlist_interactionaddrs\033[0m\tGets interaction addresses, list_interactionaddrs\n")
 	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 	io.WriteString(w, "\t\033[1mgnomonsc\033[0m\t\tShow scid of gnomon index scs\n")
