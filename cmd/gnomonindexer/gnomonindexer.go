@@ -1714,6 +1714,26 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 				logger.Printf("%v addresses, %d total integrators and %d total sc install interactions and %d total sc invoke interactions", len(addrList), interCounts.Integrator, interCounts.Installs, interCounts.Invokes)
 			}
+		case command == "list_randominteractionaddrs":
+			if len(line_parts) == 2 {
+				for ki, vi := range g.Indexers {
+					logger.Printf("- Indexer '%v'", ki)
+					intCheck, err := strconv.ParseInt(line_parts[1], 10, 64)
+					if err == nil {
+						rAddr, err := vi.GetRandInteractionAddresses(intCheck, &structures.InteractionAddrs_Params{Integrator: true, Installs: true, Invokes: true})
+
+						for _, v := range rAddr {
+							logger.Printf("%s", v)
+						}
+
+						if err != nil {
+							logger.Errorf("%v", err)
+						}
+					}
+				}
+			} else {
+				logger.Printf("list_randominteractionaddrs needs 1 value: count of addresses to return")
+			}
 		case command == "pop":
 			switch len(line_parts) {
 			case 1:

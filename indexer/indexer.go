@@ -3066,6 +3066,28 @@ func (indexer *Indexer) GetInteractionAddresses(config *structures.InteractionAd
 	return
 }
 
+// Returns a random n number of interaction addresses
+func (indexer *Indexer) GetRandInteractionAddresses(count int64, config *structures.InteractionAddrs_Params) (rAddr []string, err error) {
+	interAddrs := make(map[string]*structures.IATrack)
+	interAddrs, _ = indexer.GetInteractionAddresses(config)
+
+	i := int64(0)
+	for k, _ := range interAddrs {
+		if i >= count {
+			break
+		}
+		rAddr = append(rAddr, k)
+		i++
+	}
+
+	// Push err after generating list since the list could still be of use to the func call
+	if count > int64(len(interAddrs)) {
+		return rAddr, fmt.Errorf("Provided count '%d' is more than returned interaction addresses '%d'", count, len(interAddrs))
+	}
+
+	return
+}
+
 // Close cleanly the indexer
 func (ind *Indexer) Close() {
 	// Tell indexer a closing operation is happening; this will close out loops on next iteration
