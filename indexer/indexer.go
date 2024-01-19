@@ -3005,6 +3005,7 @@ func (indexer *Indexer) GetInteractionAddresses(config *structures.InteractionAd
 	interAddrs = make(map[string]*structures.IATrack)
 	interCounts = &structures.IATrack{}
 
+	logger.Debugf("[GetInteractionAddresses] Getting owners and integrators")
 	// Get all SCID owners
 	sclist := make(map[string]string)
 	integrators := make(map[string]int64)
@@ -3018,6 +3019,7 @@ func (indexer *Indexer) GetInteractionAddresses(config *structures.InteractionAd
 	}
 
 	// Build an interaction list
+	logger.Debugf("[GetInteractionAddresses] Building interaction list - integrator")
 	if config.Integrator {
 		for k, _ := range integrators {
 			interCounts.Integrator++
@@ -3028,6 +3030,7 @@ func (indexer *Indexer) GetInteractionAddresses(config *structures.InteractionAd
 		}
 	}
 
+	logger.Debugf("[GetInteractionAddresses] Building interaction list - invokes and installs")
 	for k, v := range sclist {
 		var invokedetails []*structures.SCTXParse
 		if config.Invokes {

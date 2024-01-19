@@ -1701,19 +1701,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			} else {
 				logger.Printf("diffscid_code needs 3 values: scid, start height and end height")
 			}
-		case command == "list_interactionaddrs":
-			for ki, vi := range g.Indexers {
-				logger.Printf("- Indexer '%v'", ki)
-				addrList := make(map[string]*structures.IATrack)
-				var interCounts *structures.IATrack
-				addrList, interCounts = vi.GetInteractionAddresses(&structures.InteractionAddrs_Params{Integrator: true, Installs: true, Invokes: true})
-
-				for k, v := range addrList {
-					logger.Printf("[%s] %d - %d - %d", k, v.Installs, v.Integrator, v.Invokes)
-				}
-
-				logger.Printf("%v addresses, %d total integrators and %d total sc install interactions and %d total sc invoke interactions", len(addrList), interCounts.Integrator, interCounts.Installs, interCounts.Invokes)
-			}
 		case command == "list_randominteractionaddrs":
 			if len(line_parts) == 2 {
 				for ki, vi := range g.Indexers {
@@ -1729,6 +1716,8 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						if err != nil {
 							logger.Errorf("%v", err)
 						}
+					} else {
+						logger.Printf("list_randominteractionaddrs needs 1 value: count of addresses to return. Supplied count is not an int.")
 					}
 				}
 			} else {
@@ -1770,8 +1759,10 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 		case line == "status":
 			for ki, vi := range g.Indexers {
 				logger.Printf("- Indexer '%v' - Generating status metrics...", ki)
-				var validatedSCIDs map[string]string
-				var regTxCount, burnTxCount, normTxCount, gnomon_count, scTxCount int64
+				var regTxCount, burnTxCount, normTxCount, gnomon_count int64
+				var interCounts *structures.IATrack
+				validatedSCIDs := make(map[string]string)
+				addrList := make(map[string]*structures.IATrack)
 
 				switch vi.DBType {
 				case "gravdb":
@@ -1781,10 +1772,6 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					regTxCount = vi.GravDBBackend.GetTxCount("registration")
 					burnTxCount = vi.GravDBBackend.GetTxCount("burn")
 					normTxCount = vi.GravDBBackend.GetTxCount("normal")
-
-					for sc, _ := range validatedSCIDs {
-						scTxCount += int64(len(vi.GravDBBackend.GetAllSCIDInvokeDetails(sc)))
-					}
 				case "boltdb":
 					validatedSCIDs = vi.BBSBackend.GetAllOwnersAndSCIDs()
 					gnomon_count = int64(len(validatedSCIDs))
@@ -1792,14 +1779,14 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 					regTxCount = vi.BBSBackend.GetTxCount("registration")
 					burnTxCount = vi.BBSBackend.GetTxCount("burn")
 					normTxCount = vi.BBSBackend.GetTxCount("normal")
-
-					for sc, _ := range validatedSCIDs {
-						scTxCount += int64(len(vi.BBSBackend.GetAllSCIDInvokeDetails(sc)))
-					}
 				}
 
+				addrList, interCounts = vi.GetInteractionAddresses(&structures.InteractionAddrs_Params{Integrator: true, Installs: true, Invokes: true})
+
 				logger.Printf("GNOMON [%d/%d] R:%d >>", vi.LastIndexedHeight, vi.ChainHeight, gnomon_count)
-				logger.Printf("TXCOUNTS [%d/%d] R:%d B:%d N:%d S:%d >>", vi.LastIndexedHeight, vi.ChainHeight, regTxCount, burnTxCount, normTxCount, scTxCount)
+				logger.Printf("TXCOUNTS [%d/%d] R:%d B:%d N:%d >>", vi.LastIndexedHeight, vi.ChainHeight, regTxCount, burnTxCount, normTxCount)
+				logger.Printf("SCACTIONS [%d/%d] I:%d A:%d >>", vi.LastIndexedHeight, vi.ChainHeight, interCounts.Installs, interCounts.Invokes-interCounts.Installs)
+				logger.Printf("INTERADDRS [%d/%d] I:%d S:%d >>", vi.LastIndexedHeight, vi.ChainHeight, interCounts.Integrator, int64(len(addrList))-interCounts.Integrator)
 				if len(vi.SearchFilter) == 0 {
 					logger.Printf("SEARCHFILTER(S) [%d/%d] >> %s", vi.LastIndexedHeight, vi.ChainHeight, "ALL SCs")
 				} else {
@@ -1853,7 +1840,6 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mgetscidlist_byaddr\033[0m\tGets list of scids that addr has interacted with, getscidlist_byaddr <addr>\n")
 	io.WriteString(w, "\t\033[1mcountinvoke_burnvalue\033[0m\tLists a scid/owner pair of a defined scid and any invokes then calculates any burnvalue for them. Optionally limited to a specified minimum height or string match filter on args, countinvoke_burnvalue <scid> || countinvoke_burnvalue <scid> <minheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mdiffscid_code\033[0m\tRuns a difference for SC code at one height vs another, diffscid_code <scid> <startHeight> <endHeight>\n")
-	io.WriteString(w, "\t\033[1mlist_interactionaddrs\033[0m\tGets interaction addresses, list_interactionaddrs\n")
 	io.WriteString(w, "\t\033[1mpop\033[0m\tRolls back lastindexheight, pop <100>\n")
 	io.WriteString(w, "\t\033[1mstatus\033[0m\t\tShow general information\n")
 	io.WriteString(w, "\t\033[1mgnomonsc\033[0m\t\tShow scid of gnomon index scs\n")
