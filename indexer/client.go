@@ -46,14 +46,14 @@ func (client *Client) Connect(endpoint string) (err error) {
 	}
 
 	// Trim off http, https, wss, ws to get endpoint to use for connecting
-	if strings.HasPrefix(endpoint, "http") {
-		ld := strings.TrimPrefix(strings.ToLower(endpoint), "http://")
-		daemon_uri = "ws://" + ld + "/ws"
-
-		client.WS, _, err = websocket.DefaultDialer.Dial(daemon_uri, nil)
-	} else if strings.HasPrefix(endpoint, "https") {
+	if strings.HasPrefix(endpoint, "https") {
 		ld := strings.TrimPrefix(strings.ToLower(endpoint), "https://")
 		daemon_uri = "wss://" + ld + "/ws"
+
+		client.WS, _, err = websocket.DefaultDialer.Dial(daemon_uri, nil)
+	} else if strings.HasPrefix(endpoint, "http") {
+		ld := strings.TrimPrefix(strings.ToLower(endpoint), "http://")
+		daemon_uri = "ws://" + ld + "/ws"
 
 		client.WS, _, err = websocket.DefaultDialer.Dial(daemon_uri, nil)
 	} else if strings.HasPrefix(endpoint, "wss") {
