@@ -84,6 +84,8 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 // ---- Start DERO DB functions ---- //
 
 func (s *Derodbstore) LoadDeroDB() (err error) {
+	logger = structures.Logger.WithFields(logrus.Fields{})
+
 	// Temp defining for now to same directory as testnet folder - TODO: see if we can natively pull in storage location? I doubt it..
 	current_path, err := os.Getwd()
 	current_path = filepath.Join(current_path, "mainnet")
