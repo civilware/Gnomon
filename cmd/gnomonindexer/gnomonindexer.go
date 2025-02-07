@@ -602,8 +602,34 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 					scinstalls, _ := wsserver.ListSC(context.Background(), structures.WS_ListSC_Params{}, vi)
 
-					for _, v := range scinstalls.ListSC {
-						logger.Printf("SCID: %v ; Owner: %v", v.Scid, v.Sender)
+					if len(scinstalls.ListSC) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls.ListSC, func(i, j int) bool {
+							return scinstalls.ListSC[i].Height < scinstalls.ListSC[j].Height
+						})
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						var filteredResults []*structures.SCTXParse
+						if len(filt_line_parts) > 1 {
+							for i := range filt_line_parts {
+								if i == 0 {
+									filteredResults = vi.PipeFilter(filt_line_parts[i], scinstalls.ListSC)
+								} else {
+									filteredResults = vi.PipeFilter(filt_line_parts[i], filteredResults)
+								}
+
+							}
+						} else {
+							filteredResults = vi.PipeFilter(filt_line_parts[0], scinstalls.ListSC)
+						}
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+						}
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults))
+					} else {
+						logger.Printf("No SCIDs installed by %v", line_parts[1])
 					}
 				}
 			}
