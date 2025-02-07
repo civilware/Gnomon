@@ -624,7 +624,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 						}
 
 						for _, invoke := range filteredResults {
-							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
+							logger.Printf("SCID: %v ; Owner: %v", invoke.Scid, invoke.Sender)
 						}
 
 						logger.Printf("Total SCs installed: %v", len(filteredResults))
