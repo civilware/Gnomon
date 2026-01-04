@@ -2,7 +2,7 @@
 
 ###2.1.0-alpha.2
 
-* Added SC installation height functions and handling for faster retrieval of SC install heights.
+* Added SC installation height functions and handling for faster retrieval of SC install heights - [#28](https://github.com/civilware/Gnomon/pull/28)
 
 ###2.1.0-alpha.1
 
