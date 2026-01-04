@@ -17,7 +17,7 @@ import (
 	"github.com/civilware/Gnomon/mbllookup"
 	"github.com/civilware/Gnomon/storage"
 	"github.com/civilware/Gnomon/structures"
-	"github.com/schollz/progressbar"
+	"github.com/schollz/progressbar/v3"
 
 	"github.com/deroproject/derohe/block"
 	"github.com/deroproject/derohe/cryptography/bn256"
@@ -790,7 +790,7 @@ func (indexer *Indexer) AddSCIDToIndex(scidstoadd map[string]*structures.FastSyn
 	// We know owner is a tree that'll be written to, no need to loop through the scexists func every time when we *know* this one exists and isn't unique by scid etc.
 	treenames = append(treenames, "owner")
 
-	bar := progressbar.New(len(scidstoadd))
+	bar := progressbar.Default(int64(len(scidstoadd)), "Adding SCIDs")
 	for scid, fsi := range scidstoadd {
 		go func(scid string, fsi *structures.FastSyncImport) {
 			defer bar.Add(1)
