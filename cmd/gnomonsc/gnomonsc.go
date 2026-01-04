@@ -386,7 +386,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 					} else {
 						logger.Printf("[runGnomonIndexer-inputscid] SCID '%v' returned properly at height '%v'.", v.SCID, v.Height)
 						// TODO: Support for authenticator/user:password rpc login for wallet interactions
-						//inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
+						inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
 					}
 				}
 			}
