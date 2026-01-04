@@ -3,6 +3,7 @@
 ###2.1.0-alpha.2
 
 * Added SC installation height functions and handling for faster retrieval of SC install heights - [#28](https://github.com/civilware/Gnomon/pull/28)
+* Progressbar for adding scids to index (most commonly noted on the longer op of fastsync scid import from index etc.)
 
 ###2.1.0-alpha.1
 
