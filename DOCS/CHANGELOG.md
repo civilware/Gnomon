@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+###2.1.0-alpha.2
+
+* Added SC installation height functions and handling for faster retrieval of SC install heights.
+
 ###2.1.0-alpha.1
 
 * Added wsserver components and various supporting/exportable [functions](./websocket/README.md)
