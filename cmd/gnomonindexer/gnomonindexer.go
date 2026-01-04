@@ -602,8 +602,34 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 
 					scinstalls, _ := wsserver.ListSC(context.Background(), structures.WS_ListSC_Params{}, vi)
 
-					for _, v := range scinstalls.ListSC {
-						logger.Printf("SCID: %v ; Owner: %v", v.Scid, v.Sender)
+					if len(scinstalls.ListSC) > 0 {
+						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
+						sort.SliceStable(scinstalls.ListSC, func(i, j int) bool {
+							return scinstalls.ListSC[i].Height < scinstalls.ListSC[j].Height
+						})
+
+						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
+						var filteredResults []*structures.SCTXParse
+						if len(filt_line_parts) > 1 {
+							for i := range filt_line_parts {
+								if i == 0 {
+									filteredResults = vi.PipeFilter(filt_line_parts[i], scinstalls.ListSC)
+								} else {
+									filteredResults = vi.PipeFilter(filt_line_parts[i], filteredResults)
+								}
+
+							}
+						} else {
+							filteredResults = vi.PipeFilter(filt_line_parts[0], scinstalls.ListSC)
+						}
+
+						for _, invoke := range filteredResults {
+							logger.Printf("SCID: %v ; Owner: %v", invoke.Scid, invoke.Sender)
+						}
+
+						logger.Printf("Total SCs installed: %v", len(filteredResults))
+					} else {
+						logger.Printf("No SCIDs installed by %v", line_parts[1])
 					}
 				}
 			}
@@ -738,140 +764,44 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 				logger.Printf("listsc_variables needs one value: single scid")
 			}
 		case command == "listsc_byheight":
-			// Split up line_parts and identify any common language filtering
-			filt_line_parts := indexer.SplitLineParts(line_parts, "|")
-
-			if len(line_parts) == 1 || line_parts[1] == "|" {
+			if len(line_parts) == 1 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
-					var scinstalls []*structures.SCTXParse
-					var sclist map[string]string
-					switch vi.DBType {
-					case "gravdb":
-						sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
-					case "boltdb":
-						sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
-					}
-					for k, _ := range sclist {
-						var invokedetails []*structures.SCTXParse
-						switch vi.DBType {
-						case "gravdb":
-							invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
-						case "boltdb":
-							invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
-						}
-						i := 0
-						for _, v := range invokedetails {
-							sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
-							if sc_action == "1" {
-								i++
-								scinstalls = append(scinstalls, v)
-							}
-						}
+					scinstalls, _ := wsserver.ListSCByHeight(context.Background(), structures.WS_ListSCByHeight_Params{}, vi)
 
-						if i == 0 {
-							logger.Debugf("No sc_action of '1' for %v", k)
-						}
+					for _, invoke := range scinstalls.ListSCByHeight {
+						logger.Printf("SCID: %s ; Owner: %s ; DeployHeight: %v", invoke.SCID, invoke.Owner, invoke.Height)
 					}
 
-					if len(scinstalls) > 0 {
-						// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
-						sort.SliceStable(scinstalls, func(i, j int) bool {
-							return scinstalls[i].Height < scinstalls[j].Height
-						})
-
-						// Filter line inputs (if applicable) and return a trimmed list to print out to cli
-						var filteredResults []*structures.SCTXParse
-						if len(filt_line_parts) > 1 {
-							for i := range filt_line_parts {
-								if i == 0 {
-									filteredResults = vi.PipeFilter(filt_line_parts[i], scinstalls)
-								} else {
-									filteredResults = vi.PipeFilter(filt_line_parts[i], filteredResults)
-								}
-
-							}
-						} else {
-							filteredResults = vi.PipeFilter(filt_line_parts[0], scinstalls)
-						}
-
-						for _, invoke := range filteredResults {
-							logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
-						}
-
-						logger.Printf("Total SCs installed: %v", len(filteredResults)+len(structures.Hardcoded_SCIDS))
-					}
+					logger.Printf("Total SCs installed: %v", len(scinstalls.ListSCByHeight)+len(structures.Hardcoded_SCIDS))
 				}
-			} else if len(line_parts) >= 2 {
+			} else if len(line_parts) == 2 {
 				if sh, err := strconv.Atoi(line_parts[1]); err == nil {
 					for ki, vi := range g.Indexers {
 						logger.Printf("- Indexer '%v'", ki)
-						var scinstalls []*structures.SCTXParse
-						var sclist map[string]string
-						switch vi.DBType {
-						case "gravdb":
-							sclist = vi.GravDBBackend.GetAllOwnersAndSCIDs()
-						case "boltdb":
-							sclist = vi.BBSBackend.GetAllOwnersAndSCIDs()
-						}
-						for k, _ := range sclist {
-							var invokedetails []*structures.SCTXParse
-							switch vi.DBType {
-							case "gravdb":
-								invokedetails = vi.GravDBBackend.GetAllSCIDInvokeDetails(k)
-							case "boltdb":
-								invokedetails = vi.BBSBackend.GetAllSCIDInvokeDetails(k)
-							}
-							i := 0
-							for _, v := range invokedetails {
-								sc_action := fmt.Sprintf("%v", v.Sc_args.Value("SC_ACTION", "U"))
-								if sc_action == "1" {
-									i++
-									scinstalls = append(scinstalls, v)
-								}
-							}
+						scinstalls, _ := wsserver.ListSCByHeight(context.Background(), structures.WS_ListSCByHeight_Params{HeightMax: int64(sh)}, vi)
 
-							if i == 0 {
-								logger.Debugf("No sc_action of '1' for %v", k)
-							}
+						for _, invoke := range scinstalls.ListSCByHeight {
+							logger.Printf("SCID: %s ; Owner: %s ; DeployHeight: %v", invoke.SCID, invoke.Owner, invoke.Height)
 						}
 
-						if len(scinstalls) > 0 {
-							// Sort heights so most recent is index 0 [if preferred reverse, just swap > with <]
-							sort.SliceStable(scinstalls, func(i, j int) bool {
-								return scinstalls[i].Height < scinstalls[j].Height
-							})
+						logger.Printf("Total SCs installed: %v", len(scinstalls.ListSCByHeight)+len(structures.Hardcoded_SCIDS))
+					}
+				} else {
+					logger.Errorf("Could not parse '%v' into an int for height", line_parts[1])
+				}
+			} else if len(line_parts) == 3 {
+				if sh, err := strconv.Atoi(line_parts[1]); err == nil {
+					if sh2, err2 := strconv.Atoi(line_parts[2]); err2 == nil {
+						for ki, vi := range g.Indexers {
+							logger.Printf("- Indexer '%v'", ki)
+							scinstalls, _ := wsserver.ListSCByHeight(context.Background(), structures.WS_ListSCByHeight_Params{HeightMin: int64(sh), HeightMax: int64(sh2)}, vi)
 
-							// Loop through and filter installations by the height paramter defined
-							l := 0
-							var scinstallsbyheight []*structures.SCTXParse
-							for _, scinst := range scinstalls {
-								if scinst.Height <= int64(sh) {
-									scinstallsbyheight = append(scinstallsbyheight, scinst)
-									l++
-								}
+							for _, invoke := range scinstalls.ListSCByHeight {
+								logger.Printf("SCID: %s ; Owner: %s ; DeployHeight: %v", invoke.SCID, invoke.Owner, invoke.Height)
 							}
 
-							// Filter line inputs (if applicable) and return a trimmed list to print out to cli
-							var filteredResults []*structures.SCTXParse
-							if len(filt_line_parts) > 1 {
-								for i := range filt_line_parts {
-									if i == 0 {
-										filteredResults = vi.PipeFilter(filt_line_parts[i], scinstallsbyheight)
-									} else {
-										filteredResults = vi.PipeFilter(filt_line_parts[i], filteredResults)
-									}
-
-								}
-							} else {
-								filteredResults = vi.PipeFilter(filt_line_parts[0], scinstallsbyheight)
-							}
-
-							for _, invoke := range filteredResults {
-								logger.Printf("SCID: %v ; Owner: %v ; DeployHeight: %v", invoke.Scid, invoke.Sender, invoke.Height)
-							}
-
-							logger.Printf("Total SCs installed: %v", l+len(structures.Hardcoded_SCIDS))
+							logger.Printf("Total SCs installed: %v", len(scinstalls.ListSCByHeight)+len(structures.Hardcoded_SCIDS))
 						}
 					}
 				} else {
@@ -997,7 +927,7 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 							}
 
 							for _, invoke := range filteredResults {
-								logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue)
+								logger.Printf("Sender: %v ; topoheight : %v ; args: %v ; burnValue: %v ; txid: %v", invoke.Sender, invoke.Height, invoke.Sc_args, invoke.Payloads[0].BurnValue, invoke.Txid)
 							}
 
 							count++
@@ -1781,7 +1711,7 @@ func usage(w io.Writer) {
 	io.WriteString(w, "\t\033[1mlistsc_code\033[0m\t\tLists SCID code, listsc_code <scid>\n")
 	io.WriteString(w, "\t\033[1mlistsc_codematch\033[0m\t\tLists SCIDs that match a given search string, listsc_codematch <Test Search String>\n")
 	io.WriteString(w, "\t\033[1mlistsc_variables\033[0m\t\tLists SCID variables at latest height unless optionally defining a height, listsc_variables <scid> <height>\n")
-	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight, listsc_byheight || listsc_byheight <maxheight> || ... | grep <stringmatch>\n")
+	io.WriteString(w, "\t\033[1mlistsc_byheight\033[0m\tList all indexed scids that match original search filter including height deployed and optionally filter by maxheight or a combination of minheight and maxheight, listsc_byheight || listsc_byheight <maxheight> || listsc_byheight <minheight> <maxheight>\n")
 	io.WriteString(w, "\t\033[1mlistsc_balances\033[0m\tLists balances of SCIDs that are greater than 0 or of a specific scid if specified, listsc_balances || listsc_balances <scid>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_byscid\033[0m\tLists a scid/owner pair of a defined scid and any invokes. Optionally limited to a specified minimum height, listscinvoke_byscid <scid> || listscinvoke_byscid <scid> <minheight> || ... | grep <stringmatch>\n")
 	io.WriteString(w, "\t\033[1mlistscinvoke_byentrypoint\033[0m\tLists sc invokes by entrypoint, listscinvoke_byentrypoint <scid> <entrypoint> || ... | grep <stringmatch>\n")

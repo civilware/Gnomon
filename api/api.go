@@ -81,6 +81,7 @@ func (apiServer *ApiServer) listen() {
 	if apiServer.Config.MBLLookup {
 		router.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
 		router.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
+		router.HandleFunc("/api/getmblbyaddr", apiServer.MBLLookupAll)
 	}
 	router.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	router.NotFoundHandler = http.HandlerFunc(notFound)
@@ -102,6 +103,7 @@ func (apiServer *ApiServer) listenSSL() {
 	if apiServer.Config.MBLLookup {
 		routerSSL.HandleFunc("/api/getmbladdrsbyhash", apiServer.MBLLookupByHash)
 		routerSSL.HandleFunc("/api/getmblcountbyaddr", apiServer.MBLLookupByAddr)
+		routerSSL.HandleFunc("/api/getmblbyaddr", apiServer.MBLLookupAll)
 	}
 	routerSSL.HandleFunc("/api/getinfo", apiServer.GetInfo)
 	routerSSL.NotFoundHandler = http.HandlerFunc(notFound)
@@ -830,16 +832,53 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 		reply["hello"] = "world"
 	}
 
+	// Query for SCID
+	addrkeys, ok := r.URL.Query()["address"]
+	var addr string
+
+	if !ok || len(addrkeys[0]) < 1 {
+		logger.Debugf("[API] URL Param 'address' is missing. Debugging only.")
+		reply["mbl"] = nil
+		err := json.NewEncoder(writer).Encode(reply)
+		if err != nil {
+			logger.Errorf("[API] Error serializing API response: %v", err)
+		}
+		return
+	} else {
+		addr = addrkeys[0]
+	}
+
+	var mblCountByAddr, mblTempCtr int64
 	allMiniBlocks := make(map[string][]*structures.MBLInfo)
-	switch apiServer.DBType {
-	case "gravdb":
-		allMiniBlocks = apiServer.GravDBBackend.GetAllMiniblockDetails()
-	case "boltdb":
-		allMiniBlocks = apiServer.BBSBackend.GetAllMiniblockDetails()
+	allMiniBlocksByAddr := make(map[string][]*structures.MBLInfo)
+	if addr != "" {
+		switch apiServer.DBType {
+		case "gravdb":
+			allMiniBlocks = apiServer.GravDBBackend.GetAllMiniblockDetails()
+			mblCountByAddr = apiServer.GravDBBackend.GetMiniblockCountByAddress(addr)
+		case "boltdb":
+			allMiniBlocks = apiServer.BBSBackend.GetAllMiniblockDetails()
+			mblCountByAddr = apiServer.BBSBackend.GetMiniblockCountByAddress(addr)
+		}
+		for k, v := range allMiniBlocks {
+			if mblCountByAddr != 0 && mblTempCtr != mblCountByAddr {
+				for _, vv := range v {
+					if vv.Miner == addr {
+						allMiniBlocksByAddr[k] = append(allMiniBlocksByAddr[k], vv)
+						mblTempCtr++
+						logger.Infof("[MBLLookupAll] mblCountByAddr: %v ; mblTempCtr: %v", mblCountByAddr, mblTempCtr)
+					}
+				}
+			} else {
+				break
+			}
+		}
+	} else {
+		allMiniBlocksByAddr = allMiniBlocks
 	}
 
 	// Case to ignore large variable returns
-	if len(allMiniBlocks) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
+	if len(allMiniBlocksByAddr) > structures.MAX_API_VAR_RETURN && apiServer.Config.ApiThrottle {
 		logger.Printf("[API-MBLLookupAll] Tried to return more than %d.. DENIED! Too much data...", structures.MAX_API_VAR_RETURN)
 		reply["mbl"] = nil
 
@@ -850,7 +889,7 @@ func (apiServer *ApiServer) MBLLookupAll(writer http.ResponseWriter, r *http.Req
 		return
 	}
 
-	reply["mbl"] = allMiniBlocks
+	reply["mbl"] = allMiniBlocksByAddr
 
 	err := json.NewEncoder(writer).Encode(reply)
 	if err != nil {
