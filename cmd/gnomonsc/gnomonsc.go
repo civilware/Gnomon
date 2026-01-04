@@ -372,8 +372,19 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 
 				if inputsc {
 					logger.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'", v.SCID)
-					// TODO: Support for authenticator/user:password rpc login for wallet interactions
-					inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
+					// Check validity of input info e.g. SC is at height provided etc., otherwise err out
+					var tOut rpc.GetSC_Result
+					tIn := rpc.GetSC_Params{SCID: v.SCID, TopoHeight: int64(v.Height), Code: true, Variables: false}
+					derodRPCClient.CallFor(&tOut, "DERO.GetSC", tIn)
+					// TODO: Future state to handle looping about for retries in the +/- of heights to find scid install
+					// NOTE: If provided index height is greater than install height, this will still pass currently. Needs to be modified/improved overall to ensure most valid dataset
+					if tOut.Code == "" {
+						logger.Errorf("[runGnomonIndexer-inputscid] SCID '%v' did not return at height '%v'. Gnomon indexing source is incorrect.", v.SCID, v.Height)
+					} else {
+						logger.Printf("[runGnomonIndexer-inputscid] SCID '%v' returned properly at height '%v'.", v.SCID, v.Height)
+						// TODO: Support for authenticator/user:password rpc login for wallet interactions
+						inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
+					}
 				}
 			}
 		}

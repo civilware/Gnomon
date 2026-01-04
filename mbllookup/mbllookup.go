@@ -56,7 +56,10 @@ func GetMBLByBLHash(bl block.Block) (mblinfo []*structures.MBLInfo, err error) {
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	var ss *graviton.Snapshot
-	DeroDB.LoadDeroDB()
+	err = DeroDB.LoadDeroDB()
+	if err != nil {
+		return
+	}
 	ss, err = DeroDB.Balance_store.LoadSnapshot(0)
 	if err != nil {
 		logger.Errorf("Err loading snapshot - %v", err)
@@ -105,7 +108,11 @@ func (s *Derodbstore) LoadDeroDB() (err error) {
 	logger = structures.Logger.WithFields(logrus.Fields{})
 
 	if DeroDBWD == "" {
-		SetDeroDBWD("")
+		err = SetDeroDBWD("")
+		if err != nil {
+			logger.Errorf("Err - Cannot identify setting the DERO DB working directory - %v", err)
+			return err
+		}
 	}
 	current_path := DeroDBWD
 	current_path = filepath.Join(current_path, "mainnet")
