@@ -435,6 +435,17 @@ func inputscid(inpscid string, scowner string, deployheight uint64, defaultIndex
 	sendtx(rpcArgs, transfers, defaultIndexer)
 }
 
+func removescid(inpscid string, defaultIndexer *indexer.Indexer) {
+	// Get gas estimate based on updatecode function to calculate appropriate storage fees to append
+	var rpcArgs = rpc.Arguments{}
+	rpcArgs = append(rpcArgs, rpc.Argument{Name: "entrypoint", DataType: "S", Value: "RemoveSCID"})
+	rpcArgs = append(rpcArgs, rpc.Argument{Name: "scid", DataType: "S", Value: inpscid})
+
+	var transfers []rpc.Transfer
+
+	sendtx(rpcArgs, transfers, defaultIndexer)
+}
+
 func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer, defaultIndexer *indexer.Indexer) {
 	var err error
 	var gasstr rpc.GasEstimate_Result
@@ -649,6 +660,11 @@ func indexcleanup(derodendpoint string, gnomonendpoint string, sf_scid_exclusion
 
 	if len(scidsToClean) > 0 {
 		logger.Errorf("[indexcleanup] List of the SCIDs to be cleaned up: %v", scidsToClean)
+
+		for _, scidToClean := range scidsToClean {
+			logger.Printf("indexcleanup-removescid] Removing SCID '%s'", scidToClean)
+			removescid(scidToClean, defaultIndexer)
+		}
 	}
 }
 
