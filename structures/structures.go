@@ -117,3 +117,75 @@ type InteractionAddrs_Params struct {
 	Installs   bool
 	Invokes    bool
 }
+
+// WS struct types
+type (
+	WS_ListSC_Params struct {
+		Address     string `json:"address"`     // can supply an address for filtering on owner/sc deployer
+		SCID        string `json:"scid"`        // can supply a scid for filtering to a specific scid
+		GetInstalls bool   `json:"getinstalls"` // takes longer, loops through each of the invokes to find the installation (if it exists) and returns relevant details
+	}
+
+	WS_ListSC_Result struct {
+		ListSC []*SCTXParse `json:"listsc"`
+	}
+)
+
+type WS_ListSCHardcoded_Result struct {
+	SCHardcoded []string `json:"schardcoded"`
+}
+
+type (
+	WS_ListSCCode_Params struct {
+		SCID   string `json:"scid"`   // supply a scid to return the code of
+		Height int64  `json:"height"` // supply a specific height to check the SCID code at
+	}
+
+	WS_ListSCCode_Result struct {
+		Code  string `json:"code"`
+		Owner string `json:"owner"`
+	}
+)
+
+type (
+	WS_ListSCCodeMatch_Params struct {
+		Match       string `json:"match"`       // supply a match string to check SC code returns against
+		IncludeCode bool   `json:"includecode"` // supply back the sccode with the results, this is a larger dataset return
+	}
+
+	WS_ListSCCodeMatch_SliceResult struct {
+		SCID  string `json:"scid"`  // returns the SCID which matched the code
+		Code  string `json:"code"`  // returns the code, assuming includecode was true in params, for the matching scid
+		Owner string `json:"owner"` // returns the owner of the matching scid
+	}
+
+	WS_ListSCCodeMatch_Result struct {
+		Results []WS_ListSCCodeMatch_SliceResult `json:"results"` // supply matching results of scid/owner pairs
+	}
+)
+
+type (
+	WS_ListSCVariables_Params struct {
+		SCID   string `json:"scid"`   // supply a scid to return the variables of
+		Height int64  `json:"height"` // supply a specific height to check the SCID variables at
+	}
+
+	WS_ListSCVariables_Result struct {
+		VariableStringKeys map[string]interface{} `json:"stringkeys"`
+		VariableUint64Keys map[uint64]interface{} `json:"uint64keys"`
+	}
+)
+
+type (
+	WS_ListSCByHeight_Params struct {
+		HeightMax int64 `json:"heightmax"` // supply a specific height to check for all known installations up to
+		HeightMin int64 `json:"heightmin"` // supply a specific height to check for all known installations since specified height
+		SortDesc  bool  `json:"sortdesc"`  // if set to true, height list return will be sorted in descending order (e.g. index 0 is the lowest/oldest height)
+	}
+
+	WS_ListSCByHeight_Result struct {
+		ListSCByHeight []GnomonSCIDQuery `json:"listscbyheight"`
+	}
+)
+
+// End WS struct types

@@ -210,6 +210,80 @@ func (bbs *BboltStore) GetAllOwnersAndSCIDs() map[string]string {
 	return results
 }
 
+// Stores the install height of a given scid
+func (bbs *BboltStore) StoreInstallHeight(scid string, height int64) (changes bool, err error) {
+	bName := "sciheight"
+
+	err = bbs.DB.Update(func(tx *bolt.Tx) (err error) {
+		b, err := tx.CreateBucketIfNotExists([]byte(bName))
+		if err != nil {
+			return fmt.Errorf("bucket: %s", err)
+		}
+
+		iHeight := strconv.FormatInt(height, 10)
+
+		err = b.Put([]byte(scid), []byte(iHeight))
+		changes = true
+		return
+	})
+
+	return
+}
+
+// Returns the install height of a given scid
+func (bbs *BboltStore) GetInstallHeight(scid string) (iHeight int64) {
+	var v []byte
+	bName := "sciheight"
+
+	bbs.DB.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket([]byte(bName))
+		if b != nil {
+			key := scid
+			v = b.Get([]byte(key))
+
+			if v != nil {
+				iHeight, err = strconv.ParseInt(string(v), 10, 64)
+				if err != nil {
+					return fmt.Errorf("[bbs-GetInstallHeight] ERR - Error parsing stored int for install height: %v", err)
+				}
+			}
+		}
+
+		return
+	})
+
+	return
+}
+
+// Returns all of the deployed SCIDs with their corresponding install heights
+func (bbs *BboltStore) GetAllSCIDsAndInstallHeights() map[string]int64 {
+	results := make(map[string]int64)
+
+	bName := "sciheight"
+
+	bbs.DB.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket([]byte(bName))
+		if b != nil {
+			c := b.Cursor()
+
+			for k, v := c.First(); err == nil; k, v = c.Next() {
+				if k != nil && v != nil {
+					results[string(k)], err = strconv.ParseInt(string(v), 10, 64)
+					if err != nil {
+						return fmt.Errorf("[bbs-GetAllSCIDsAndInstallHeights] ERR - Error parsing stored int for install height: %v", err)
+					}
+				} else {
+					break
+				}
+			}
+		}
+
+		return
+	})
+
+	return results
+}
+
 // Stores all normal txs with SCIDs and their respective ring members for future balance/interaction reference
 func (bbs *BboltStore) StoreNormalTxWithSCIDByAddr(addr string, normTxWithSCID *structures.NormalTXWithSCIDParse) (changes bool, err error) {
 	var newNormTxsWithSCID []byte
@@ -325,8 +399,16 @@ func (bbs *BboltStore) StoreInvokeDetails(scid string, signer string, entrypoint
 
 	bName := scid
 
-	txidLen := len(invokedetails.Txid)
-	key := signer + ":" + invokedetails.Txid[0:3] + invokedetails.Txid[txidLen-3:txidLen] + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
+	// Check if installsc call to determine the key
+	var key string
+	sc_action := fmt.Sprintf("%v", invokedetails.Sc_args.Value("SC_ACTION", "U"))
+	if sc_action == "1" {
+		key = "installsc"
+		logger.Debugf("[StoreInvokeDetails-%s] Storing invokedetails at height '%v' under key '%s'", scid, invokedetails.Height, key)
+	} else {
+		txidLen := len(invokedetails.Txid)
+		key = signer + ":" + invokedetails.Txid[0:3] + invokedetails.Txid[txidLen-3:txidLen] + ":" + strconv.FormatInt(topoheight, 10) + ":" + entrypoint
+	}
 
 	err = bbs.DB.Update(func(tx *bolt.Tx) (err error) {
 		b, err := tx.CreateBucketIfNotExists([]byte(bName))
@@ -340,6 +422,49 @@ func (bbs *BboltStore) StoreInvokeDetails(scid string, signer string, entrypoint
 	})
 
 	return
+}
+
+// Stores scinvoke calls from a given scid that match installsc
+func (bbs *BboltStore) StoreSCIDInstallSCDetails(scid string, invokedetails *structures.SCTXParse) (changes bool, err error) {
+	confBytes, err := json.Marshal(invokedetails)
+	if err != nil {
+		return changes, fmt.Errorf("[StoreSCIDInstallSCDetails] could not marshal invokedetails info: %v", err)
+	}
+
+	bName := scid
+	key := "installsc"
+
+	err = bbs.DB.Update(func(tx *bolt.Tx) (err error) {
+		b, err := tx.CreateBucketIfNotExists([]byte(bName))
+		if err != nil {
+			return fmt.Errorf("bucket: %s", err)
+		}
+
+		err = b.Put([]byte(key), []byte(confBytes))
+		changes = true
+		return
+	})
+
+	return
+}
+
+// Returns scinvoke call from a given scid that match installsc
+func (bbs *BboltStore) GetSCIDInstallSCDetails(scid string) (invokedetails *structures.SCTXParse) {
+	var v []byte
+	bName := scid
+
+	bbs.DB.View(func(tx *bolt.Tx) (err error) {
+		b := tx.Bucket([]byte(bName))
+		if b != nil {
+			key := "installsc"
+			v = b.Get([]byte(key))
+			_ = json.Unmarshal(v, &invokedetails)
+		}
+
+		return
+	})
+
+	return invokedetails
 }
 
 // Returns all scinvoke calls from a given scid
