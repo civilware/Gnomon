@@ -1,17 +1,17 @@
 ## CHANGELOG
 
-###2.1.0-alpha.2
+### 2.1.0-alpha.2 - 2026-01-04
 
 * Added SC installation height functions and handling for faster retrieval of SC install heights - [#28](https://github.com/civilware/Gnomon/pull/28)
 * Progressbar for adding scids to index (most commonly noted on the longer op of fastsync scid import from index etc.)
 
-###2.1.0-alpha.1
+### 2.1.0-alpha.1 - 2024-12-05
 
 * Added wsserver components and various supporting/exportable [functions](./websocket/README.md)
 * Updated installsc calls to store under a key of 'installsc' for faster parsing on get operations
   * Remediation for existing DBs will come in another upcoming alpha.x release
 
-###2.0.3-alpha.8
+### 2.0.3-alpha.8 - 2024-04-12
 
 * Fastsync force height diff knobs
 * SC stored Values handling of various in-built functions (when alone) from [#2](https://github.com/civilware/Gnomon/issues/2)
@@ -21,24 +21,24 @@
 * Custom data directory for gnomondb and derodb (if used) - [#26](https://github.com/civilware/Gnomon/pull/26)
 * Bug fixes
 
-###2.0.3-alpha.1
+### 2.0.3-alpha.1 - 2023-12-11
 
 * Fastsync configuration moved to a structure to better support future changes and customizations.
 * GnomonIndexer CLI Updates
     * listsc_codematch, diffscid_code, countinvoke_burnvalue added
     * Added pipe filtering in new filter.go current and future support to be used within cli commands e.g. '| grep dReams' or '| exclude dReams'
 
-###2.0.2-alpha.1
+### 2.0.2-alpha.1 - 2023-11-20
 
 * Indexer 'Status' property added that can be referenced for an easy state check for connected packages, dApps etc.
 
-###2.0.1-alpha.1
+### 2.0.1-alpha.1 - 2023-11-16
 
 * fastsync struct for future state custom configs w/ fastsync
 * skipfsrecheck option added for options to skip re-validation of scids ingested from gnomon index sc
 * AddSCIDToIndex() is usable outside of just fastsync options and is capable of on-the-fly utilization
 
-###2.0.0-alpha.1
+### 2.0.0-alpha.1 - 2023-10-30
 
 Gnomon version 2, alpha release 1.
 
@@ -52,6 +52,6 @@ Gnomon version 2, alpha release 1.
 * pull request template, bug and feature request templates
 * optimizations throughout
 
-###1.0.0.
+### 1.0.0 - 2022-07-20
 
 * Gnomon Implemented
