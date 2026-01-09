@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/deroproject/derohe/cryptography/crypto"
 	"github.com/deroproject/derohe/rpc"
+	"github.com/schollz/progressbar/v3"
 	"github.com/sirupsen/logrus"
 
 	"github.com/docopt/docopt-go"
@@ -51,6 +51,7 @@ Options:
   --search-filter=<"Function InputStr(input String, varname String) Uint64">	Defines a search filter to match on installed SCs to add to validated list and index all actions, this will most likely change in the future but can allow for some small variability. Include escapes etc. if required. If nothing is defined, it will pull all (minus hardcoded sc).
   --sf-scid-exclusions=<"a05395bb0cf77adc850928b0db00eb5ca7a9ccbafd9a38d021c8d299ad5ce1a4;;;c9d23d2fc3aaa8e54e238a2218c0e5176a6e48780920fd8474fac5b0576110a2">     Defines a scid or scids (use const separator [default ';;;']) to be excluded from indexing regardless of search-filter. If nothing is defined, all scids that match the search-filter will be indexed.
   --skip-gnomonsc-index     If the gnomonsc is caught within the supplied search filter, you can skip indexing that SC given the size/depth of calls to that SC for increased sync times.
+  --cleanup-index     (Index Owner ONLY) Runs cleanup function which re-checks indexed SCs and their installation height. If they do not match, purge the entry and allow re-indexing with appropriate data.
   --debug     Enables debug logging`
 
 // TODO: Add as a passable param perhaps? Or other. Using ;;; for now, can be anything really.. just think what isn't used in norm SC code iterations
@@ -142,6 +143,11 @@ func main() {
 		}
 	}
 
+	var cleanupIndex bool
+	if arguments["--cleanup-index"] != nil && arguments["--cleanup-index"].(bool) == true {
+		cleanupIndex = true
+	}
+
 	logger.Printf("[Main] Using block deploy buffer of '%v' blocks.", thAddition)
 
 	// wallet/derod rpc clients
@@ -167,6 +173,10 @@ func main() {
 	for {
 		fetchGnomonIndexes(gnomon_api_endpoint)
 		runGnomonIndexer(daemon_rpc_endpoint, gnomon_api_endpoint, search_filter, sf_scid_exclusions)
+		if cleanupIndex {
+			logger.Printf("[Main] --cleanup-index defined, running cleanup function.")
+			indexcleanup(daemon_rpc_endpoint, gnomon_api_endpoint, []string{})
+		}
 		logger.Printf("[Main] Round completed. Sleeping 1 minute for next round.")
 		time.Sleep(60 * time.Second)
 	}
@@ -268,18 +278,8 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 	variables, _, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight, nil, nil, nil, false)
 
 	logger.Printf("[runGnomonIndexer] Looping through discovered SCs and checking to see if any are not indexed.")
-	var perc float64
-	var tperc, intperc int64
-	percStep := 1
-	for k, v := range gnomonIndexes {
-		// Crude percentage output tracker for longer running operations. Remove later, just debugging purposes.
-		perc = (float64(k) / float64(len(gnomonIndexes))) * float64(100)
-		intperc = int64(math.Trunc(perc))
-		if intperc%int64(percStep) == 0 && tperc < intperc {
-			tperc = intperc
-			logger.Printf("[runGnomonIndexer] Looping... %.0f %% - %v / %v", perc, k, len(gnomonIndexes))
-		}
-
+	bar := progressbar.Default(int64(len(gnomonIndexes)), "[runGnomonIndexer] Looping Index SCIDs")
+	for _, v := range gnomonIndexes {
 		var contains bool
 		var code string
 		i := 0
@@ -289,6 +289,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 		if err != nil {
 			// Do not attempt to index if err is returned. Possible reasons being daemon connectivity failure etc.
 			logger.Errorf("[runGnomonIndexer] Skipping index of '%v' this round. GetSCIDValuesByKey errored out - %v", v.SCID, err)
+			bar.Add(1)
 			continue
 		}
 		if len(valuesstringbykey) > 0 {
@@ -326,6 +327,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				txpool, err = defaultIndexer.RPC.GetTxPool()
 				if err != nil {
 					logger.Errorf("[runGnomonIndexer-GetTxPool] ERROR Getting TX Pool - %v . Skipping index of SCID '%v' for safety.", err, v.SCID)
+					bar.Add(1)
 					continue
 				} else {
 					logger.Printf("[runGnomonIndexer-GetTxPool] TX Pool List - %v", txpool)
@@ -343,6 +345,7 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 				bl_sctxs, _, _, _, err := defaultIndexer.IndexTxn(cIndex, true)
 				if err != nil {
 					logger.Errorf("[runGnomonIndexer-IndexTxn] ERROR - %v . Skipping index of SCID '%v' for safety.", err, v.SCID)
+					bar.Add(1)
 					continue
 				}
 
@@ -372,11 +375,23 @@ func runGnomonIndexer(derodendpoint string, gnomonendpoint string, search_filter
 
 				if inputsc {
 					logger.Printf("[runGnomonIndexer-inputscid] Clear to input scid '%v'", v.SCID)
-					// TODO: Support for authenticator/user:password rpc login for wallet interactions
-					inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
+					// Check validity of input info e.g. SC is at height provided etc., otherwise err out
+					var tOut rpc.GetSC_Result
+					tIn := rpc.GetSC_Params{SCID: v.SCID, TopoHeight: int64(v.Height), Code: true, Variables: false}
+					derodRPCClient.CallFor(&tOut, "DERO.GetSC", tIn)
+					// TODO: Future state to handle looping about for retries in the +/- of heights to find scid install
+					// NOTE: If provided index height is greater than install height, this will still pass currently. Needs to be modified/improved overall to ensure most valid dataset
+					if tOut.Code == "" {
+						logger.Errorf("[runGnomonIndexer-inputscid] SCID '%v' did not return at height '%v'. Gnomon indexing source is incorrect.", v.SCID, v.Height)
+					} else {
+						logger.Printf("[runGnomonIndexer-inputscid] SCID '%v' returned properly at height '%v'.", v.SCID, v.Height)
+						// TODO: Support for authenticator/user:password rpc login for wallet interactions
+						inputscid(v.SCID, v.Owner, v.Height, defaultIndexer)
+					}
 				}
 			}
 		}
+		bar.Add(1)
 	}
 	if !changes {
 		logger.Printf("[runGnomonIndexer] No changes made.")
@@ -415,6 +430,17 @@ func inputscid(inpscid string, scowner string, deployheight uint64, defaultIndex
 	}
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "scowner", DataType: "S", Value: scowner})
 	rpcArgs = append(rpcArgs, rpc.Argument{Name: "deployheight", DataType: "U", Value: deployheight})
+	var transfers []rpc.Transfer
+
+	sendtx(rpcArgs, transfers, defaultIndexer)
+}
+
+func removescid(inpscid string, defaultIndexer *indexer.Indexer) {
+	// Get gas estimate based on updatecode function to calculate appropriate storage fees to append
+	var rpcArgs = rpc.Arguments{}
+	rpcArgs = append(rpcArgs, rpc.Argument{Name: "entrypoint", DataType: "S", Value: "RemoveSCID"})
+	rpcArgs = append(rpcArgs, rpc.Argument{Name: "scid", DataType: "S", Value: inpscid})
+
 	var transfers []rpc.Transfer
 
 	sendtx(rpcArgs, transfers, defaultIndexer)
@@ -514,6 +540,131 @@ func sendtx(rpcArgs rpc.Arguments, transfers []rpc.Transfer, defaultIndexer *ind
 		return
 	} else {
 		logger.Printf("[sendtx] Tx sent successfully - txid: %v", str.TXID)
+	}
+}
+
+// Runs cleanup operations which include checking existing indexed SCIDs against their deploy heights stored. If invalid return, purge from index
+// NOTE: This should be ran only when knowledge of invalid data is present or other misc cases, most likely not something to always have enabled on the service
+func indexcleanup(derodendpoint string, gnomonendpoint string, sf_scid_exclusions []string) {
+	mux.Lock()
+	defer mux.Unlock()
+	var lastQuery map[string]interface{}
+	var currheight int64
+	logger.Printf("[runGnomonIndexer] Provisioning new RAM indexer...")
+	graviton_backend, err := storage.NewGravDBRAM("25ms")
+	if err != nil {
+		logger.Errorf("[runGnomonIndexer] Error creating new gravdb: %v", err)
+		return
+	}
+
+	// Get current height from getinfo api to poll current network states. Fallback to slow and steady mode.
+	var defaultIndexer *indexer.Indexer
+	logger.Printf("[fetchGnomonIndexes] Getting current height data")
+	rs, err := http.Get("http://" + gnomonendpoint + "/api/getinfo")
+	if err != nil {
+		logger.Errorf("[fetchGnomonIndexes] gnomon height query err %s", err)
+	} else {
+		logger.Printf("[fetchGnomonIndexes] Retrieved getinfo data... reading in current height.")
+		b, err := io.ReadAll(rs.Body)
+		if err != nil {
+			logger.Errorf("[fetchGnomonIndexes] error reading getinfo body %s", err)
+		} else {
+			err = json.Unmarshal(b, &lastQuery)
+			if err != nil {
+				logger.Errorf("[fetchGnomonIndexes] error unmarshalling b %s", err)
+			}
+
+			if lastQuery["getinfo"] != nil {
+				for k, v := range lastQuery["getinfo"].(map[string]interface{}) {
+					if k == "height" {
+						currheight = int64(v.(float64))
+					}
+				}
+			}
+		}
+	}
+
+	// If we can gather the current height from /api/getinfo then start-topoheight will be passed and fastsync not used. This saves time to not check all SCIDs from gnomon SC. Otherwise default back to "slow and steady" method.
+	if currheight > 0 {
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, currheight, derodendpoint, "daemon", false, false, nil, sf_scid_exclusions, false)
+		defaultIndexer.StartDaemonMode(1)
+	} else {
+		fsc := &structures.FastSyncConfig{Enabled: true, SkipFSRecheck: true, ForceFastSync: true, NoCode: false}
+		defaultIndexer = indexer.NewIndexer(graviton_backend, nil, "gravdb", nil, int64(1), derodendpoint, "daemon", false, false, fsc, sf_scid_exclusions, false)
+		defaultIndexer.StartDaemonMode(1)
+	}
+
+	for {
+		if defaultIndexer.ChainHeight <= 1 || defaultIndexer.LastIndexedHeight < defaultIndexer.ChainHeight {
+			logger.Printf("[indexcleanup] Waiting on defaultIndexer... (%v / %v)", defaultIndexer.LastIndexedHeight, defaultIndexer.ChainHeight)
+			time.Sleep(5 * time.Second)
+		} else {
+			break
+		}
+	}
+
+	var variables []*structures.SCIDVariable
+	variables, _, _, _ = defaultIndexer.RPC.GetSCVariables(scid, defaultIndexer.ChainHeight, nil, nil, nil, false)
+
+	var clChkSCIDs []string
+	for _, v := range variables {
+		switch ckey := v.Key.(type) {
+		case string:
+			if v.Value != nil {
+				switch len(ckey) {
+				case 64:
+					clChkSCIDs = append(clChkSCIDs, ckey)
+				default:
+					// Nothing - only should match defined ckey lengths
+				}
+			}
+		}
+	}
+
+	logger.Printf("[indexcleanup] Looping through indexed SCs and checking if any have invalid data.")
+	bar := progressbar.Default(int64(len(clChkSCIDs)), "[indexcleanup] Looping Index SCIDs")
+	var scidsToClean []string
+	for _, v := range clChkSCIDs {
+		i := 0
+		_, valuesuint64bykey, err := defaultIndexer.GetSCIDValuesByKey(variables, scid, v+"height", defaultIndexer.ChainHeight)
+		if err != nil {
+			// Do not attempt to index if err is returned. Possible reasons being daemon connectivity failure etc.
+			logger.Errorf("[indexcleanup] Skipping index of '%v' this round. GetSCIDValuesByKey errored out - %v", v, err)
+			bar.Add(1)
+			continue
+		}
+		if len(valuesuint64bykey) > 0 {
+			i++
+		}
+
+		var tHeight int64
+		if i > 0 {
+			tHeight = int64(valuesuint64bykey[0])
+		}
+
+		// Check validity of input info e.g. SC is at height provided etc., otherwise err out
+		var tOut rpc.GetSC_Result
+		tIn := rpc.GetSC_Params{SCID: v, TopoHeight: tHeight, Code: true, Variables: false}
+		derodRPCClient.CallFor(&tOut, "DERO.GetSC", tIn)
+		// TODO: Future state to handle looping about for retries in the +/- of heights to find scid install
+		// NOTE: If provided index height is greater than install height, this will still pass currently. Needs to be modified/improved overall to ensure most valid dataset
+		if tOut.Code == "" {
+			//logger.Errorf("[runGnomonIndexer-inputscid] SCID '%v' did not return at height '%v'. Gnomon indexing source is incorrect, cleanup required.", v, tHeight)
+			scidsToClean = append(scidsToClean, v)
+		} else {
+			//logger.Printf("[runGnomonIndexer-inputscid] SCID '%v' returned properly at height '%v'.", v.SCID, v.Height)
+		}
+
+		bar.Add(1)
+	}
+
+	if len(scidsToClean) > 0 {
+		logger.Errorf("[indexcleanup] List of the SCIDs to be cleaned up: %v", scidsToClean)
+
+		for _, scidToClean := range scidsToClean {
+			logger.Printf("indexcleanup-removescid] Removing SCID '%s'", scidToClean)
+			removescid(scidToClean, defaultIndexer)
+		}
 	}
 }
 
