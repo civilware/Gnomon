@@ -1,5 +1,9 @@
 ## CHANGELOG
 
+### 2.1.0-alpha.3 - 2026-01-12
+
+* Added AddSCID_ToIndex method through WS for interactions as needed.
+
 ### 2.1.0-alpha.2 - 2026-01-04
 
 * Added SC installation height functions and handling for faster retrieval of SC install heights - [#28](https://github.com/civilware/Gnomon/pull/28)

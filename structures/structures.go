@@ -188,4 +188,14 @@ type (
 	}
 )
 
+type (
+	WS_AddSCIDToIndex_Params struct {
+		SCID string `json:"scid"` // defines the SCID to index
+	}
+
+	WS_AddSCIDToIndex_Result struct {
+		Result string `json:"result"`
+	}
+)
+
 // End WS struct types

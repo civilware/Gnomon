@@ -1410,12 +1410,12 @@ func (g *GnomonServer) readline_loop(l *readline.Instance) (err error) {
 			if len(line_parts) == 2 && len(line_parts[1]) == 64 {
 				for ki, vi := range g.Indexers {
 					logger.Printf("- Indexer '%v'", ki)
-					scidstoadd := make(map[string]*structures.FastSyncImport)
-					scidstoadd[line_parts[1]] = &structures.FastSyncImport{}
-					err = vi.AddSCIDToIndex(scidstoadd, false, true)
+					result, err := wsserver.AddSCIDToIndex(context.Background(), structures.WS_AddSCIDToIndex_Params{SCID: line_parts[1]}, vi)
 					if err != nil {
-						logger.Printf("Err - %v", err)
+						logger.Errorf("Err - %v", err)
 					}
+
+					logger.Printf("[Result] %v", result.Result)
 				}
 			} else {
 				logger.Printf("addscid_toindex needs 1 values: single scid to match as arguments")
