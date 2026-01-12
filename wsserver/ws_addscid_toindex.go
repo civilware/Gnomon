@@ -16,7 +16,7 @@ func AddSCIDToIndex(ctx context.Context, p structures.WS_AddSCIDToIndex_Params, 
 
 	scidstoadd := make(map[string]*structures.FastSyncImport)
 	scidstoadd[p.SCID] = &structures.FastSyncImport{}
-	err = indexer.AddSCIDToIndex(scidstoadd, false, true)
+	err = indexer.AddSCIDToIndex(scidstoadd, p.SkipFSRecheck, p.VarStoreOnly)
 	if err != nil {
 		logger.Printf("Err - %v", err)
 		result.Result = fmt.Sprintf("Err - %v", err)

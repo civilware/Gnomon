@@ -183,7 +183,9 @@ func main() {
 			var pingpong structures.WS_AddSCIDToIndex_Result
 
 			params := structures.WS_AddSCIDToIndex_Params{
-				SCID: "e12689bf2e670ab627c90a24cf6d1a3ad0f6eea80a0cc55c32a0af4bc77ce5d0",
+				SCID:          "e12689bf2e670ab627c90a24cf6d1a3ad0f6eea80a0cc55c32a0af4bc77ce5d0",
+				SkipFSRecheck: false,
+				VarStoreOnly:  true,
 			}
 
 			err = Client.RPC.CallResult(context.Background(), method, params, &pingpong)

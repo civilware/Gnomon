@@ -190,7 +190,9 @@ type (
 
 type (
 	WS_AddSCIDToIndex_Params struct {
-		SCID string `json:"scid"` // defines the SCID to index
+		SCID          string `json:"scid"`          // defines the SCID to index
+		SkipFSRecheck bool   `json:"skipfsrecheck"` // defines skipping the fastsync re-check
+		VarStoreOnly  bool   `json:"varstoreonly"`  // defines if just storing variable retrieval (bypasses if scid is already 'indexed' from exiting out)
 	}
 
 	WS_AddSCIDToIndex_Result struct {
